@@ -1,26 +1,70 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, GitBranch } from 'lucide-react';
-
-// Mock data for repositories
-const MOCK_REPOSITORIES = [
-    { id: 1, name: 'InfraZero', visibility: 'Private', updatedTime: '2 days ago', language: 'TypeScript', color: '#3178C6' },
-    { id: 2, name: 'Immersa', visibility: 'Private', updatedTime: '5 hours ago', language: 'Python', color: '#3572A5' },
-    { id: 3, name: 'velocis-core', visibility: 'Private', updatedTime: '1 week ago', language: 'TypeScript', color: '#3178C6' },
-    { id: 4, name: 'ai-observatory', visibility: 'Public', updatedTime: '3 days ago', language: 'JavaScript', color: '#F1E05A' },
-];
+import { Search, GitBranch, Loader2, CheckCircle2 } from 'lucide-react';
+import {
+  getGithubRepos,
+  installRepo,
+  getInstallStatus,
+  type GitHubRepo,
+} from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 
 export const RepoSelectionPage: React.FC = () => {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const [repos, setRepos] = useState<GitHubRepo[]>([]);
+    const [isLoadingRepos, setIsLoadingRepos] = useState(true);
+    const [reposError, setReposError] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [installingId, setInstallingId] = useState<number | null>(null);
+    const [installSteps, setInstallSteps] = useState<{ label: string; status: string }[]>([]);
 
-    const filteredRepos = MOCK_REPOSITORIES.filter(repo =>
+    useEffect(() => {
+        getGithubRepos({ per_page: 50 })
+            .then((res) => setRepos(res.repos))
+            .catch((err) => setReposError(err.message ?? 'Failed to load repositories'))
+            .finally(() => setIsLoadingRepos(false));
+    }, []);
+
+    const filteredRepos = repos.filter(repo =>
         repo.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const handleInstallClick = (repoId: number) => {
-        // Mock installation & redirect to repository page
-        navigate(`/repo/${repoId}`);
+    const pollInstallStatus = useCallback(
+        (repoId: number, slug: string) => {
+            const interval = setInterval(async () => {
+                try {
+                    const status = await getInstallStatus(repoId);
+                    setInstallSteps(status.steps.map((s) => ({ label: s.label, status: s.status })));
+                    if (status.overall_status === 'complete' || status.overall_status === 'failed') {
+                        clearInterval(interval);
+                        setInstallingId(null);
+                        if (status.overall_status === 'complete') {
+                            navigate(`/repo/${slug ?? repoId}`);
+                        }
+                    }
+                } catch {
+                    clearInterval(interval);
+                    setInstallingId(null);
+                }
+            }, 1500);
+        },
+        [navigate],
+    );
+
+    const handleInstallClick = async (repo: GitHubRepo) => {
+        if (installingId !== null) return;
+        setInstallingId(repo.github_id);
+        setInstallSteps([]);
+        try {
+            const job = await installRepo(repo.github_id);
+            setInstallSteps(job.steps.map((s) => ({ label: s.label, status: s.status })));
+            const slug = repo.name.toLowerCase().replace(/\s+/g, '-');
+            pollInstallStatus(repo.github_id, slug);
+        } catch (err: any) {
+            setInstallingId(null);
+            alert(err.message ?? 'Installation failed');
+        }
     };
 
     return (
@@ -42,9 +86,14 @@ export const RepoSelectionPage: React.FC = () => {
                         </svg>
                         GitHub connected
                     </div>
-                    <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center font-medium text-gray-600 border border-gray-200">
-                        JD
-                    </div>
+                    {user && (
+                        <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center font-medium text-gray-600 border border-gray-200 overflow-hidden">
+                            {user.avatar_url
+                                ? <img src={user.avatar_url} alt={user.login} className="w-full h-full object-cover" />
+                                : user.login.slice(0, 2).toUpperCase()
+                            }
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -87,40 +136,75 @@ export const RepoSelectionPage: React.FC = () => {
                     </div>
 
                     <div className="p-5 md:p-6 flex flex-col gap-3 max-h-[500px] overflow-y-auto">
-                        {filteredRepos.length > 0 ? (
-                            filteredRepos.map((repo) => (
-                                <div key={repo.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-gray-300 hover:shadow-sm transition-all bg-white group">
-                                    <div className="flex items-start gap-4">
-                                        <div className="mt-1 w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-500 shrink-0">
-                                            <GitBranch className="w-4 h-4" />
-                                        </div>
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <h3 className="text-[15px] font-semibold text-gray-900 leading-none">{repo.name}</h3>
+                        {isLoadingRepos ? (
+                            <div className="flex items-center justify-center py-12 gap-3 text-gray-500">
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                                <span className="text-sm font-medium">Loading repositories…</span>
+                            </div>
+                        ) : reposError ? (
+                            <div className="text-center py-12 text-red-500 font-medium text-sm">{reposError}</div>
+                        ) : filteredRepos.length > 0 ? (
+                            filteredRepos.map((repo) => {
+                                const isInstalling = installingId === repo.github_id;
+                                return (
+                                    <div key={repo.github_id} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-gray-300 hover:shadow-sm transition-all bg-white group">
+                                        <div className="flex items-start gap-4">
+                                            <div className="mt-1 w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-500 shrink-0">
+                                                <GitBranch className="w-4 h-4" />
                                             </div>
-                                            <div className="flex items-center gap-2 text-[13px] text-gray-500 font-medium">
-                                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${repo.visibility === 'Public' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
-                                                    {repo.visibility}
-                                                </span>
-                                                <span>•</span>
-                                                <span>Updated {repo.updatedTime}</span>
-                                                <span>•</span>
-                                                <span className="flex items-center gap-1.5">
-                                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: repo.color }}></span>
-                                                    {repo.language}
-                                                </span>
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1.5">
+                                                    <h3 className="text-[15px] font-semibold text-gray-900 leading-none">{repo.name}</h3>
+                                                    {repo.velocis_installed && (
+                                                        <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                                                            <CheckCircle2 className="w-3 h-3" /> Installed
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2 text-[13px] text-gray-500 font-medium">
+                                                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${repo.visibility === 'public' ? 'bg-blue-50 text-blue-600 border border-blue-100' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
+                                                        {repo.visibility === 'public' ? 'Public' : 'Private'}
+                                                    </span>
+                                                    <span>•</span>
+                                                    <span>Updated {new Date(repo.updated_at).toLocaleDateString()}</span>
+                                                    <span>•</span>
+                                                    <span className="flex items-center gap-1.5">
+                                                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: repo.language_color }}></span>
+                                                        {repo.language}
+                                                    </span>
+                                                </div>
+                                                {/* Install progress steps */}
+                                                {isInstalling && installSteps.length > 0 && (
+                                                    <div className="mt-2 flex flex-col gap-1">
+                                                        {installSteps.map((step, i) => (
+                                                            <div key={i} className="flex items-center gap-2 text-[12px]">
+                                                                {step.status === 'complete' ? (
+                                                                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                                                ) : step.status === 'in_progress' ? (
+                                                                    <Loader2 className="w-3 h-3 text-blue-500 animate-spin" />
+                                                                ) : (
+                                                                    <span className="w-3 h-3 rounded-full border border-gray-300" />
+                                                                )}
+                                                                <span className={step.status === 'complete' ? 'text-emerald-600' : step.status === 'in_progress' ? 'text-blue-600' : 'text-gray-400'}>
+                                                                    {step.label}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
-                                    </div>
 
-                                    <button
-                                        onClick={() => handleInstallClick(repo.id)}
-                                        className="h-10 px-5 bg-black text-white text-[13px] font-semibold rounded-lg hover:bg-gray-800 transition-colors shrink-0 shadow-sm"
-                                    >
-                                        Install Velocis
-                                    </button>
-                                </div>
-                            ))
+                                        <button
+                                            onClick={() => handleInstallClick(repo)}
+                                            disabled={!!installingId || repo.velocis_installed}
+                                            className="h-10 px-5 bg-black text-white text-[13px] font-semibold rounded-lg hover:bg-gray-800 transition-colors shrink-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                        >
+                                            {isInstalling ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Installing…</> : repo.velocis_installed ? 'Installed' : 'Install Velocis'}
+                                        </button>
+                                    </div>
+                                );
+                            })
                         ) : (
                             <div className="text-center py-12 text-gray-500 font-medium">
                                 No repositories found matching "{searchQuery}"

@@ -1,90 +1,79 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, CheckCircle, Lock, Eye, Shield, GitBranch } from 'lucide-react';
+import { Search, CheckCircle, Lock, Eye, Shield, GitBranch, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { useAuth } from '../../lib/auth';
+
+// Mock repo — replace with API call once backend auth is live
+const MOCK_REPOS = [
+  {
+    github_id: 1,
+    name: 'velocis-commerce',
+    visibility: 'private',
+    language: 'TypeScript',
+    language_color: '#3178c6',
+    updated_at: '2026-03-01T00:00:00Z',
+    velocis_installed: false,
+    description: 'Modern e-commerce platform with AI-powered recommendations',
+  },
+];
 
 export function OnboardingPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [selectedRepoGithubId, setSelectedRepoGithubId] = useState<number | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [installComplete, setInstallComplete] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
-  const repositories = [
-    {
-      name: 'InfraZero',
-      visibility: 'Private',
-      lastUpdate: '2 days ago',
-      language: 'TypeScript',
-      languageColor: '#3178c6'
-    },
-    {
-      name: 'Immersa',
-      visibility: 'Private',
-      lastUpdate: '5 hours ago',
-      language: 'Python',
-      languageColor: '#3572A5'
-    },
-    {
-      name: 'velocis-core',
-      visibility: 'Private',
-      lastUpdate: '1 week ago',
-      language: 'TypeScript',
-      languageColor: '#3178c6'
-    },
-    {
-      name: 'ai-observatory',
-      visibility: 'Public',
-      lastUpdate: '3 days ago',
-      language: 'JavaScript',
-      languageColor: '#f1e05a'
-    },
-    {
-      name: 'distributed-lab',
-      visibility: 'Private',
-      lastUpdate: '2 weeks ago',
-      language: 'Go',
-      languageColor: '#00ADD8'
-    },
-    {
-      name: 'test-sandbox',
-      visibility: 'Public',
-      lastUpdate: '1 day ago',
-      language: 'Python',
-      languageColor: '#3572A5'
-    }
-  ];
+  // Mock repo list — replace with getGithubRepos() once backend auth is live
+  const [repositories, setRepositories] = useState(MOCK_REPOS);
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [reposError] = useState<string | null>(null);
 
-  const installSteps = [
-    { label: 'Registering GitHub webhook', icon: GitBranch },
-    { label: 'Initializing Sentinel', icon: Shield },
-    { label: 'Provisioning Fortress QA loop', icon: CheckCircle },
-    { label: 'Activating Visual Cortex', icon: Eye }
-  ];
+  const [installSteps, setInstallSteps] = useState<{ label: string; status: string }[]>([
+    { label: 'Registering GitHub webhook', status: 'queued' },
+    { label: 'Initializing Sentinel', status: 'queued' },
+    { label: 'Provisioning Fortress QA loop', status: 'queued' },
+    { label: 'Activating Visual Cortex', status: 'queued' },
+  ]);
 
   const filteredRepos = repositories.filter(repo =>
     repo.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleInstall = (repoName: string) => {
-    setSelectedRepo(repoName);
+  // Simulated install — steps complete one by one, then navigate to dashboard
+  const handleInstall = (repo: typeof MOCK_REPOS[0]) => {
+    setSelectedRepo(repo.name);
+    setSelectedRepoGithubId(repo.github_id);
     setIsInstalling(true);
+    setInstallComplete(false);
     setCurrentStep(0);
 
-    // Simulate installation steps
-    const stepDuration = 1200;
-    installSteps.forEach((_, index) => {
+    const steps = [
+      'Registering GitHub webhook',
+      'Initializing Sentinel',
+      'Provisioning Fortress QA loop',
+      'Activating Visual Cortex',
+    ];
+
+    const resetSteps = steps.map(label => ({ label, status: 'queued' }));
+    setInstallSteps(resetSteps);
+
+    steps.forEach((_, idx) => {
       setTimeout(() => {
-        setCurrentStep(index + 1);
-        if (index === installSteps.length - 1) {
-          setTimeout(() => {
-            setInstallComplete(true);
-          }, 800);
+        setInstallSteps(prev =>
+          prev.map((s, i) => i === idx ? { ...s, status: 'complete' } : s)
+        );
+        setCurrentStep(idx + 1);
+        if (idx === steps.length - 1) {
+          setInstallComplete(true);
         }
-      }, stepDuration * (index + 1));
+      }, (idx + 1) * 900);
     });
   };
 
@@ -121,12 +110,16 @@ export function OnboardingPage() {
               </span>
             </div>
             <div 
-              className="w-9 h-9 rounded-full flex items-center justify-center"
+              className="w-9 h-9 rounded-full flex items-center justify-center overflow-hidden"
               style={{ backgroundColor: 'var(--bg-soft)' }}
             >
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                JD
-              </span>
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt={user.login} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {user?.login?.slice(0, 2).toUpperCase() ?? 'U'}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -232,9 +225,17 @@ export function OnboardingPage() {
 
           {/* Repo list */}
           <div className="space-y-3">
-            {filteredRepos.map((repo, index) => (
+            {isLoadingRepos ? (
+              <div className="flex items-center justify-center py-12 gap-3" style={{ color: 'var(--text-secondary)' }}>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm font-medium">Loading repositories…</span>
+              </div>
+            ) : reposError ? (
+              <div className="text-center py-12 text-red-500 text-sm">{reposError}</div>
+            ) : (
+              filteredRepos.map((repo, index) => (
               <motion.div
-                key={repo.name}
+                key={repo.github_id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.6 + index * 0.06 }}
@@ -256,6 +257,11 @@ export function OnboardingPage() {
                     {/* Repo name */}
                     <div className="font-semibold text-[15px] mb-1" style={{ color: 'var(--text-primary)' }}>
                       {repo.name}
+                      {repo.velocis_installed && (
+                        <span className="ml-2 px-2 py-0.5 text-[11px] rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                          Installed
+                        </span>
+                      )}
                     </div>
 
                     {/* Metadata */}
@@ -263,20 +269,17 @@ export function OnboardingPage() {
                       <span 
                         className="px-2 py-0.5 rounded text-[11px] font-medium"
                         style={{ 
-                          backgroundColor: repo.visibility === 'Private' ? 'rgba(0, 0, 0, 0.05)' : 'var(--accent-blue-soft)',
-                          color: repo.visibility === 'Private' ? 'var(--text-primary)' : 'var(--accent-blue)'
+                          backgroundColor: repo.visibility === 'private' ? 'rgba(0, 0, 0, 0.05)' : 'var(--accent-blue-soft)',
+                          color: repo.visibility === 'private' ? 'var(--text-primary)' : 'var(--accent-blue)'
                         }}
                       >
-                        {repo.visibility}
+                        {repo.visibility === 'private' ? 'Private' : 'Public'}
                       </span>
                       <span>•</span>
-                      <span>Updated {repo.lastUpdate}</span>
+                      <span>Updated {new Date(repo.updated_at).toLocaleDateString()}</span>
                       <span>•</span>
                       <div className="flex items-center gap-1.5">
-                        <div 
-                          className="w-2.5 h-2.5 rounded-full"
-                          style={{ backgroundColor: repo.languageColor }}
-                        />
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: repo.language_color }} />
                         <span>{repo.language}</span>
                       </div>
                     </div>
@@ -287,17 +290,19 @@ export function OnboardingPage() {
                 <motion.button
                   whileHover={{ y: -1 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => handleInstall(repo.name)}
-                  className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg"
+                  onClick={() => handleInstall(repo)}
+                  disabled={repo.velocis_installed}
+                  className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ 
                     backgroundColor: 'var(--cta-primary)',
                     color: 'var(--cta-text)'
                   }}
                 >
-                  Install Velocis
+                  {repo.velocis_installed ? 'Installed' : 'Install Velocis'}
                 </motion.button>
               </motion.div>
-            ))}
+            ))
+            )}
           </div>
         </motion.div>
       </div>
@@ -382,9 +387,9 @@ export function OnboardingPage() {
                   {/* Progress steps */}
                   <div className="space-y-4 mb-8">
                     {installSteps.map((step, index) => {
-                      const isCompleted = currentStep > index;
-                      const isActive = currentStep === index;
-                      const isPending = currentStep < index;
+                      const isCompleted = step.status === 'complete';
+                      const isActive = step.status === 'in_progress';
+                      const isPending = step.status === 'queued';
 
                       return (
                         <motion.div

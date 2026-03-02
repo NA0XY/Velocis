@@ -1,0 +1,733 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Velocis Backend — AWS SAM template defining all Lambda functions and
+  API Gateway routes per the API contract (v1.0.0).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GLOBALS — apply to all Lambda functions unless overridden
+# ─────────────────────────────────────────────────────────────────────────────
+Globals:
+  Function:
+    Runtime:      nodejs20.x
+    Timeout:      30
+    MemorySize:   256
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        NODE_ENV:              !Ref Environment
+        AWS_REGION_OVERRIDE:   !Ref AWS::Region
+        USERS_TABLE:           !Ref UsersTable
+        REPOS_TABLE:           !Ref ReposTable
+        SENTINEL_TABLE:        !Ref SentinelTable
+        PIPELINE_TABLE:        !Ref PipelineTable
+        CORTEX_TABLE:          !Ref CortexTable
+        TIMELINE_TABLE:        !Ref TimelineTable
+        ACTIVITY_TABLE:        !Ref ActivityTable
+        DEPLOYS_TABLE:         !Ref DeploymentsTable
+        ANNOTATIONS_TABLE:     !Ref AnnotationsTable
+        CHAT_TABLE:            !Ref WorkspaceChatTable
+        IAC_TABLE:             !Ref IacTable
+        IAC_JOBS_TABLE:        !Ref IacJobsTable
+        HEALTH_TABLE:          !Ref SystemHealthTable
+        INSTALL_TABLE:         !Ref InstallTable
+        SCAN_JOBS_TABLE:       !Ref ScanJobsTable
+        JWT_SECRET:            !Sub "{{resolve:ssm:/velocis/${Environment}/jwt-secret}}"
+        GITHUB_APP_CLIENT_ID:  !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-id}}"
+        GITHUB_APP_CLIENT_SECRET: !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-secret}}"
+        GITHUB_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/velocis/${Environment}/webhook-secret}}"
+        FRONTEND_ORIGIN:       !Sub "https://app.velocis.dev"
+        API_BASE_URL:          !Sub "https://api.velocis.dev/v1"
+
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization,x-repo-owner,x-repo-name'"
+      AllowOrigin:  "'https://app.velocis.dev'"
+      AllowCredentials: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARAMETERS
+# ─────────────────────────────────────────────────────────────────────────────
+Parameters:
+  Environment:
+    Type:    String
+    Default: development
+    AllowedValues: [development, staging, production]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESOURCES
+# ─────────────────────────────────────────────────────────────────────────────
+Resources:
+
+  VelocisApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName:     v1
+      Description:   Velocis REST API v1
+      Auth:
+        DefaultAuthorizer: NONE  # JWT verified per-handler via extractBearerToken
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 1 — AUTHENTICATION
+  # ──────────────────────────────────────────────────────────────────────────
+
+  AuthInitiateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/auth.initiateGithubOAuth
+      Description: GET /auth/github — Redirect to GitHub OAuth
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /auth/github
+            Method: GET
+
+  AuthCallbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/auth.handleGithubCallback
+      Description: GET /auth/github/callback — Exchange OAuth code for JWT
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /auth/github/callback
+            Method: GET
+
+  AuthLogoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/auth.logout
+      Description: POST /auth/logout
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /auth/logout
+            Method: POST
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 2 — USER
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getMe.handler
+      Description: GET /me
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /me
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 3 — GITHUB REPOSITORIES
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetGithubReposFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getGithubRepos.handler
+      Description: GET /github/repos
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /github/repos
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 4 — ONBOARDING / INSTALLATION
+  # ──────────────────────────────────────────────────────────────────────────
+
+  InstallRepoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/installRepo.installRepo
+      Description: POST /repos/:repoId/install
+      Timeout:     60
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/install
+            Method: POST
+
+  GetInstallStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/installRepo.getInstallStatus
+      Description: GET /repos/:repoId/install/status
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/install/status
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 5 — DASHBOARD
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetDashboardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getDashboard.handler
+      Description: GET /dashboard
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /dashboard
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 6 — REPOSITORY OVERVIEW
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetRepoOverviewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getRepoOverview.handler
+      Description: GET /repos/:repoId
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 7 — SENTINEL AGENT
+  # ──────────────────────────────────────────────────────────────────────────
+
+  SentinelListPrsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getSentinelData.listPrs
+      Description: GET /repos/:repoId/sentinel/prs
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/sentinel/prs
+            Method: GET
+
+  SentinelGetPrDetailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getSentinelData.getPrDetail
+      Description: GET /repos/:repoId/sentinel/prs/:prNumber
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/sentinel/prs/{prNumber}
+            Method: GET
+
+  SentinelTriggerScanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getSentinelData.triggerScan
+      Description: POST /repos/:repoId/sentinel/scan
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/sentinel/scan
+            Method: POST
+
+  SentinelActivityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getSentinelData.getSentinelActivity
+      Description: GET /repos/:repoId/sentinel/activity
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/sentinel/activity
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 8 — FORTRESS AGENT / PIPELINE
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetPipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.getPipeline
+      Description: GET /repos/:repoId/pipeline
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/pipeline
+            Method: GET
+
+  GetPipelineRunsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.getPipelineRuns
+      Description: GET /repos/:repoId/pipeline/runs
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/pipeline/runs
+            Method: GET
+
+  TriggerPipelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.triggerPipeline
+      Description: POST /repos/:repoId/pipeline/trigger
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/pipeline/trigger
+            Method: POST
+
+  GetPipelineRunDetailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.getPipelineRunDetail
+      Description: GET /repos/:repoId/pipeline/runs/:runId
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/pipeline/runs/{runId}
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 9 — CORTEX AGENT (SERVICE MAP)
+  # Route /repos/:repoId/cortex/services* is served by the new simplified handler.
+  # The rich internal graph format is still served by getCortexData.ts (advanced use).
+  # ──────────────────────────────────────────────────────────────────────────
+
+  CortexListServicesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getCortexServices.listServices
+      Description: GET /repos/:repoId/cortex/services
+      Timeout:     60
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/cortex/services
+            Method: GET
+
+  CortexGetServiceDetailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getCortexServices.getServiceDetail
+      Description: GET /repos/:repoId/cortex/services/:serviceId
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/cortex/services/{serviceId}
+            Method: GET
+
+  CortexTimelineFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getCortexServices.getCortexTimeline
+      Description: GET /repos/:repoId/cortex/timeline
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/cortex/timeline
+            Method: GET
+
+  # Internal advanced graph endpoint (kept for backward compatibility)
+  GetCortexDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getCortexData.handler
+      Description: GET /repos/:repoId/cortex (advanced graph format)
+      Timeout:     60
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/cortex
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 10 — WORKSPACE (Monaco Editor + Sentinel Chat)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  WorkspaceListFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.listFiles
+      Description: GET /repos/:repoId/workspace/files
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/files
+            Method: GET
+
+  WorkspaceGetFileContentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.getFileContent
+      Description: GET /repos/:repoId/workspace/files/content
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/files/content
+            Method: GET
+
+  WorkspaceGetAnnotationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.getAnnotations
+      Description: GET /repos/:repoId/workspace/annotations
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/annotations
+            Method: GET
+
+  WorkspaceSendChatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.sendChatMessage
+      Description: POST /repos/:repoId/workspace/chat
+      Timeout:     60
+      MemorySize:  512
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/chat
+            Method: POST
+
+  WorkspaceChatHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.getChatHistory
+      Description: GET /repos/:repoId/workspace/chat/history
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/chat/history
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 11 — INFRASTRUCTURE / IaC PREDICTOR
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetInfrastructureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getInfrastructureData.getInfrastructure
+      Description: GET /repos/:repoId/infrastructure
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/infrastructure
+            Method: GET
+
+  GetTerraformFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getInfrastructureData.getTerraform
+      Description: GET /repos/:repoId/infrastructure/terraform
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/infrastructure/terraform
+            Method: GET
+
+  GenerateInfrastructureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getInfrastructureData.generateInfrastructure
+      Description: POST /repos/:repoId/infrastructure/generate
+      Timeout:     60
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/infrastructure/generate
+            Method: POST
+
+  # Internal advanced IaC endpoint (kept for backward compat with getCostForecast.ts)
+  GetCostForecastFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getCostForecast.handler
+      Description: GET /repos/:repoId/infrastructure/forecast (multi-env compare)
+      Timeout:     60
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/infrastructure/forecast
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 12 — ACTIVITY FEED
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetActivityFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getActivity.handler
+      Description: GET /activity
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /activity
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 13 — SYSTEM HEALTH
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GetSystemHealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getSystemHealth.handler
+      Description: GET /system/health
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /system/health
+            Method: GET
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 16 — GITHUB WEBHOOK (all event types)
+  # ──────────────────────────────────────────────────────────────────────────
+
+  GithubWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/webhooks/githubPush.handler
+      Description: POST /webhooks/github — push, pull_request, deployment, ping
+      Timeout:     29        # Must respond to GitHub within 10s; use SQS for long work
+      MemorySize:  512
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /webhooks/github
+            Method: POST
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # DYNAMODB TABLES
+  # One table per concern — single-table design is optional future work.
+  # ──────────────────────────────────────────────────────────────────────────
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  ReposTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-repos
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: repoId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: repoId, KeyType: HASH }
+
+  InstallTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-installations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: jobId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: jobId, KeyType: HASH }
+
+  SentinelTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-sentinel
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  PipelineTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-pipeline-runs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: runId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: runId, KeyType: HASH }
+
+  CortexTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-cortex
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  TimelineTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-timeline
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  ActivityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-activity
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  DeploymentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-deployments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  AnnotationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-annotations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  WorkspaceChatTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-workspace-chat
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: messageId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: messageId, KeyType: HASH }
+
+  IacTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-iac
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  IacJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-iac-jobs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: jobId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: jobId, KeyType: HASH }
+
+  SystemHealthTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-system-health
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+
+  ScanJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: velocis-scan-jobs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: scanId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: scanId, KeyType: HASH }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OUTPUTS
+# ─────────────────────────────────────────────────────────────────────────────
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL for the Velocis REST API
+    Value: !Sub "https://${VelocisApi}.execute-api.${AWS::Region}.amazonaws.com/v1"
+    Export:
+      Name: VelocisApiBaseUrl

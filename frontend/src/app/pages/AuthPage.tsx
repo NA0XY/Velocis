@@ -2,11 +2,25 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import gsap from 'gsap';
 import { Github, Check } from 'lucide-react';
+import { useAuth } from '../../lib/auth';
 
 export const AuthPage: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
+    const { login, isAuthenticated, isLoading: authLoading } = useAuth();
+
+    // If user is already authenticated, forward them appropriately:
+    // - Fresh OAuth callback (token in the URL) → /onboarding
+    // - Pre-existing session                    → /dashboard
+    useEffect(() => {
+        if (authLoading) return;
+        if (!isAuthenticated) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const isFreshLogin = params.has('token') || params.has('access_token');
+        navigate(isFreshLogin ? '/onboarding' : '/dashboard', { replace: true });
+    }, [isAuthenticated, authLoading, navigate]);
 
     useEffect(() => {
         const ctx = gsap.context(() => {
@@ -20,10 +34,9 @@ export const AuthPage: React.FC = () => {
 
     const handleGitHubAuth = () => {
         setIsLoading(true);
-        setTimeout(() => {
-            setIsLoading(false);
-            navigate('/onboarding');
-        }, 1200);
+        // TODO: Re-enable GitHub OAuth once backend deployment is fixed
+        // login();
+        setTimeout(() => navigate('/onboarding'), 800);
     };
 
     return (
