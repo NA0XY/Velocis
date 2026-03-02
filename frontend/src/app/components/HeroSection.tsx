@@ -6,6 +6,8 @@ import { Github, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { PrimaryButton } from './shared/PrimaryButton';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+
 /* ─── Sub-components ─── */
 
 interface EdgeSlabProps {
@@ -129,7 +131,7 @@ export function HeroSection() {
   const smoothMouseX = useSpring(mouseX, { stiffness: 50, damping: 20 });
   const smoothMouseY = useSpring(mouseY, { stiffness: 50, damping: 20 });
 
-  const handleConnect = () => navigate('/onboarding');
+  const handleConnect = () => { window.location.href = `${BACKEND_URL}/api/auth/github`; };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {

@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { Github, Check } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
+import gsap from 'gsap';
+import { Github, Check, AlertCircle } from 'lucide-react';
+
+// The backend API base URL — point to localhost during dev
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
 
 /* ─── entrance animation (drop-in; swap for gsap if available) ─────────────── */
 const useEntrance = (ref: React.RefObject<HTMLDivElement | null>) => {
@@ -472,15 +476,33 @@ const RightDecoration: React.FC = () => {
 export const AuthPage: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const [isLoading, setIsLoading] = useState(false);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+    // Handle error codes redirected back from the OAuth callback
+    useEffect(() => {
+        const error = searchParams.get('error');
+        if (error === 'access_denied') setErrorMsg('GitHub access was denied. Please try again.');
+        else if (error === 'session_expired') setErrorMsg('Session expired. Please try again.');
+        else if (error === 'auth_failed') setErrorMsg('Authentication failed. Please try again.');
+        else if (error === 'invalid_callback') setErrorMsg('Invalid callback. Please try again.');
+    }, [searchParams]);
 
     useEntrance(containerRef);
 
     const handleGitHubAuth = () => {
         setIsLoading(true);
+<<<<<<< Updated upstream
         // TODO: Replace with actual OAuth → window.location.href = '/api/auth/github';
         setTimeout(() => { setIsLoading(false); navigate('/onboarding'); }, 1200);
+=======
+        setErrorMsg(null);
+        // Redirect browser to backend — backend sets cookie + redirects to GitHub
+        window.location.href = `${BACKEND_URL}/api/auth/github`;
+>>>>>>> Stashed changes
     };
+
 
     return (
         <div
@@ -525,6 +547,13 @@ export const AuthPage: React.FC = () => {
                     </div>
 
                     <div className="p-6 pb-5 flex flex-col">
+                        {/* Error Banner */}
+                        {errorMsg && (
+                            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-[10px] px-4 py-3 mb-4">
+                                <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+                                <span className="text-red-300 text-[12px]">{errorMsg}</span>
+                            </div>
+                        )}
                         <button
                             onClick={handleGitHubAuth}
                             disabled={isLoading}

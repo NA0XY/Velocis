@@ -8,7 +8,6 @@ import { WorkspacePage } from "./pages/WorkspacePage";
 import { PipelinePage } from "./pages/PipelinePage";
 import { InfrastructurePage } from "./pages/InfrastructurePage";
 import { AuthPage } from "./pages/AuthPage";
-import { RepoSelectionPage } from "./pages/RepoSelectionPage";
 
 export const router = createBrowserRouter([
   {
@@ -18,10 +17,6 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <HomePage />,
-  },
-  {
-    path: "/select-repo",
-    element: <RepoSelectionPage />,
   },
   {
     path: "/onboarding",

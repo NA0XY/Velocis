@@ -5,6 +5,8 @@ import { Github, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { PrimaryButton } from './shared/PrimaryButton';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+
 const reassuranceItems = [
   'No code changes required',
   'Works with private repos',
@@ -13,7 +15,7 @@ const reassuranceItems = [
 
 export function FinalCTA() {
   const navigate = useNavigate();
-  const handleConnect = () => navigate('/onboarding');
+  const handleConnect = () => { window.location.href = `${BACKEND_URL}/api/auth/github`; };
 
   return (
     <section className="py-40 relative overflow-hidden" aria-label="Get started">

@@ -6,17 +6,19 @@ import { useNavigate, useLocation } from 'react-router';
 import { PrimaryButton } from './shared/PrimaryButton';
 import { GhostButton } from './shared/GhostButton';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+
 export function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleConnect = () => {
-    navigate('/onboarding');
+    window.location.href = `${BACKEND_URL}/api/auth/github`;
   };
 
   const handleLogin = () => {
-    navigate('/onboarding');
+    window.location.href = `${BACKEND_URL}/api/auth/github`;
   };
 
   return (

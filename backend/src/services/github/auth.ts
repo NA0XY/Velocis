@@ -211,21 +211,36 @@ export async function handleOAuthCallback(
   let scope: string;
 
   try {
-    const auth = createOAuthAppAuth({
-      clientType: "oauth-app",
-      clientId: config.GITHUB_CLIENT_ID,
-      clientSecret: config.GITHUB_CLIENT_SECRET,
+    // Direct POST to GitHub's token endpoint — works for both GitHub Apps and OAuth Apps
+    const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: config.GITHUB_CLIENT_ID,
+        client_secret: config.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: config.GITHUB_OAUTH_REDIRECT_URI,
+      }),
     });
 
-    const tokenAuth = await auth({
-      type: "oauth-user",
-      code,
-      redirectUrl: config.GITHUB_OAUTH_REDIRECT_URI,
-    });
+    const tokenData = await tokenResponse.json() as {
+      access_token?: string;
+      token_type?: string;
+      scope?: string;
+      error?: string;
+      error_description?: string;
+    };
 
-    accessToken = tokenAuth.token;
-    tokenType = tokenAuth.tokenType;
-    scope = "token" in tokenAuth ? (tokenAuth as any).scopes?.join(" ") ?? "" : "";
+    if (tokenData.error || !tokenData.access_token) {
+      throw new Error(tokenData.error_description ?? tokenData.error ?? "No access_token in response");
+    }
+
+    accessToken = tokenData.access_token;
+    tokenType = tokenData.token_type ?? "bearer";
+    scope = tokenData.scope ?? "";
   } catch (err) {
     logger.error({
       msg: "handleOAuthCallback: token exchange failed",
@@ -640,8 +655,7 @@ export async function verifyRepoAccess(
       return false;
     }
     throw new GitHubAuthError(
-      `verifyRepoAccess: unexpected error for ${owner}/${name}: ${
-        err instanceof Error ? err.message : String(err)
+      `verifyRepoAccess: unexpected error for ${owner}/${name}: ${err instanceof Error ? err.message : String(err)
       }`
     );
   }

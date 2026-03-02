@@ -138,8 +138,8 @@ const ConfigSchema = z.object({
     .string()
     .min(1, "GITHUB_CLIENT_ID is required")
     .refine(
-      (val) => /^(Iv1\.|[0-9a-f]{20})/.test(val),
-      { message: "GITHUB_CLIENT_ID must start with 'Iv1.' (OAuth App) or be a 20-char hex string" }
+      (val) => /^Iv[a-zA-Z0-9]{2,}\.?/.test(val) || /^[0-9a-f]{20}$/.test(val),
+      { message: "GITHUB_CLIENT_ID must be a valid GitHub App or OAuth App client ID" }
     ),
 
   GITHUB_CLIENT_SECRET: z
