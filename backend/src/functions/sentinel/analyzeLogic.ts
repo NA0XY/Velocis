@@ -1329,10 +1329,13 @@ export async function runSentinelReview(codeDiff: string): Promise<string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QUICK TEST — Execute with: npx ts-node src/functions/sentinel/analyzeLogic.ts
+// QUICK TEST — Execute standalone with:
+//   npx ts-node src/functions/sentinel/analyzeLogic.ts
+// DO NOT run this file as a module import — it will execute the test inline.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const mockSqlInjectionDiff = `
+if (require.main === module) {
+  const mockSqlInjectionDiff = `
 --- a/src/routes/users.ts
 +++ b/src/routes/users.ts
 @@ -12,7 +12,10 @@ router.get('/user', async (req, res) => {
@@ -1345,4 +1348,5 @@ const mockSqlInjectionDiff = `
  });
 `;
 
-runSentinelReview(mockSqlInjectionDiff).catch(console.error);
+  runSentinelReview(mockSqlInjectionDiff).catch(console.error);
+}

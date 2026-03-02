@@ -1,10 +1,11 @@
 /**
  * Velocis — API Client
- * Base URL: VITE_API_BASE_URL  (defaults to https://api.velocis.dev/v1)
- * Auth:     Bearer JWT stored in localStorage under "velocis_token"
+ * Base URL: VITE_BACKEND_URL  (defaults to http://localhost:3001)
+ * Auth:     Session cookie (velocis_session) set by OAuth callback
+ *           + legacy Bearer JWT fallback for older endpoints
  */
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string) ?? 'https://api.velocis.dev/v1';
+const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) ?? 'http://localhost:3001';
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 export const TOKEN_KEY = 'velocis_token';
@@ -33,7 +34,11 @@ async function request<T>(
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include',   // Always send session cookie
+  });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -76,15 +81,15 @@ export interface AuthTokenResponse {
 
 /** Redirects browser to GitHub OAuth consent screen */
 export function redirectToGitHubOAuth(): void {
-  window.location.href = `${BASE_URL}/auth/github`;
+  window.location.href = `${BASE_URL}/api/auth/github`;
 }
 
 /** Invalidates server session */
 export const logout = (): Promise<void> =>
-  request('/auth/logout', { method: 'POST' });
+  request('/api/auth/logout', { method: 'POST' });
 
 // ─── 2. User ──────────────────────────────────────────────────────────────────
-export const getMe = (): Promise<AuthUser> => request('/me');
+export const getMe = (): Promise<AuthUser> => request('/api/me');
 
 // ─── 3. GitHub Repositories ───────────────────────────────────────────────────
 export interface GitHubRepo {
@@ -115,8 +120,29 @@ export const getGithubRepos = (params?: {
   if (params?.page) qs.set('page', String(params.page));
   if (params?.per_page) qs.set('per_page', String(params.per_page));
   const query = qs.toString() ? `?${qs}` : '';
-  return request(`/github/repos${query}`);
+  return request(`/api/github/repos${query}`);
 };
+
+/** Fetch repos using the session-cookie auth (new OAuth flow) */
+export interface SessionReposResponse {
+  repos: Array<{
+    id: number;
+    name: string;
+    fullName: string;
+    isPrivate: boolean;
+    language: string | null;
+    updatedAt: string;
+    htmlUrl: string;
+    description: string | null;
+    stars: number;
+    ownerId: number;
+    ownerLogin: string;
+  }>;
+  login: string;
+}
+
+export const getSessionRepos = (): Promise<SessionReposResponse> =>
+  request('/api/repos');
 
 // ─── 4. Onboarding / Installation ─────────────────────────────────────────────
 export interface InstallStep {

@@ -76,8 +76,8 @@ Resources:
   AuthInitiateFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler:     src/handlers/api/auth.initiateGithubOAuth
-      Description: GET /auth/github — Redirect to GitHub OAuth
+      Handler:     src/handlers/api/authGithub.handler
+      Description: GET /auth/github — Redirect to GitHub OAuth (session-cookie flow)
       Events:
         Api:
           Type: Api
@@ -89,8 +89,8 @@ Resources:
   AuthCallbackFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler:     src/handlers/api/auth.handleGithubCallback
-      Description: GET /auth/github/callback — Exchange OAuth code for JWT
+      Handler:     src/handlers/api/authGithubCallback.handler
+      Description: GET /auth/github/callback — Exchange OAuth code, set session cookie
       Events:
         Api:
           Type: Api
