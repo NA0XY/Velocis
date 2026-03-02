@@ -611,6 +611,10 @@ process.on("unhandledRejection", (reason, promise) => {
     stack: reason instanceof Error ? reason.stack : undefined,
     promise: String(promise),
   });
+  if (!isLambda) {
+    console.error("Unhandled Promise Rejection:", reason);
+    process.exit(1);
+  }
 });
 
 process.on("uncaughtException", (err) => {
@@ -620,7 +624,12 @@ process.on("uncaughtException", (err) => {
     errorMessage: err.message,
     stack: err.stack,
   });
-  // Allow Lambda runtime to handle the exit — don't call process.exit() here
+  // Allow Lambda runtime to handle the exit — don't call process.exit() here, 
+  // but if we are running locally (like via tsx server.ts), we MUST exit!
+  if (!isLambda) {
+    console.error("Uncaught Exception:", err);
+    process.exit(1);
+  }
 });
 
 // ─────────────────────────────────────────────

@@ -156,6 +156,7 @@ export async function initOAuthFlow(
     scope: scopeString,
     state,
     allow_signup: "true",
+    prompt: "select_account",
   });
 
   const authorizationUrl = `https://github.com/login/oauth/authorize?${params_.toString()}`;

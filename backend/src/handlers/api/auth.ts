@@ -37,6 +37,7 @@ import {
   preflight,
   extractBearerToken,
 } from "../../utils/apiResponse";
+import { revokeUserToken } from "../../services/github/auth";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNALS
@@ -45,8 +46,8 @@ import {
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
-const JWT_SECRET   = process.env.JWT_SECRET   ?? "changeme-in-production";
-const JWT_TTL_S    = 86400; // 24 hours
+const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
+const JWT_TTL_S = 86400; // 24 hours
 
 interface GitHubTokenResponse {
   access_token: string;
@@ -110,9 +111,9 @@ export const initiateGithubOAuth = async (
 
   const state = randomUUID(); // CSRF token — in production store in a short-lived cookie
   const params = new URLSearchParams({
-    client_id:    config.GITHUB_CLIENT_ID,
+    client_id: config.GITHUB_CLIENT_ID,
     redirect_uri: `${config.API_GATEWAY_BASE_URL ?? "https://api.velocis.dev/v1"}/auth/github/callback`,
-    scope:        "repo read:user user:email",
+    scope: "repo read:user user:email",
     state,
   });
 
@@ -167,15 +168,15 @@ export const handleGithubCallback = async (
       new PutCommand({
         TableName: USERS_TABLE,
         Item: {
-          id:           userId,
-          github_id:    ghUser.id,
-          login:        ghUser.login,
-          name:         ghUser.name ?? ghUser.login,
-          email:        ghUser.email ?? null,
-          avatar_url:   ghUser.avatar_url,
+          id: userId,
+          github_id: ghUser.id,
+          login: ghUser.login,
+          name: ghUser.name ?? ghUser.login,
+          email: ghUser.email ?? null,
+          avatar_url: ghUser.avatar_url,
           github_token: tokenData.access_token, // encrypted at rest via DynamoDB KMS
-          created_at:   createdAt,
-          updated_at:   now,
+          created_at: createdAt,
+          updated_at: now,
         },
       })
     );
@@ -186,14 +187,14 @@ export const handleGithubCallback = async (
     // 5. Respond — return token in JSON body and as a short-lived cookie
     const responseBody = {
       access_token: velocisToken,
-      token_type:   "bearer",
-      expires_in:   JWT_TTL_S,
+      token_type: "bearer",
+      expires_in: JWT_TTL_S,
       user: {
-        id:         userId,
-        github_id:  ghUser.id,
-        login:      ghUser.login,
-        name:       ghUser.name ?? ghUser.login,
-        email:      ghUser.email,
+        id: userId,
+        github_id: ghUser.id,
+        login: ghUser.login,
+        name: ghUser.name ?? ghUser.login,
+        email: ghUser.email,
         avatar_url: ghUser.avatar_url,
       },
     };
@@ -222,6 +223,12 @@ export const logout = async (
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { sub: string };
     const userId = decoded.sub;
+
+    try {
+      await revokeUserToken(userId);
+    } catch (revokeErr) {
+      logger.warn({ msg: "Failed to revoke GitHub token, proceeding to clean up session", error: revokeErr });
+    }
 
     // Clear the stored GitHub token so the session cannot be reused
     await dynamo.send(

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Search, Home, Star, Sun, Moon, Loader2 } from 'lucide-react';
+import { Search, Home, Star, Sun, Moon, Loader2, LogOut } from 'lucide-react';
 import type { DashboardResponse, ActivityEvent, SystemHealth } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 
@@ -72,8 +72,9 @@ const CommitBarChart = ({
 export function DashboardPage() {
   const [activityTab, setActivityTab] = useState("all");
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   // Mock state — replace with API calls once backend auth is live
   const [dashboardData] = useState<DashboardResponse>(MOCK_DASHBOARD);
@@ -209,9 +210,34 @@ export function DashboardPage() {
 
               <div className="relative">
                 <div className="absolute inset-0 bg-indigo-500/20 blur-md rounded-full" />
-                <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white dark:bg-slate-800 border border-indigo-100 dark:border-indigo-500/30 relative shadow-sm cursor-pointer hover:scale-105 transition-transform text-indigo-600 dark:text-indigo-400 font-bold text-sm">
-                  R
-                </div>
+                <button
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  onBlur={() => setTimeout(() => setIsProfileOpen(false), 150)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-white dark:bg-slate-800 border border-indigo-100 dark:border-indigo-500/30 relative shadow-sm cursor-pointer hover:scale-105 transition-transform text-indigo-600 dark:text-indigo-400 font-bold text-sm"
+                >
+                  {dashboardData?.user.name?.[0]?.toUpperCase() ?? user?.name?.[0]?.toUpperCase() ?? 'U'}
+                </button>
+
+                {isProfileOpen && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg py-1 z-50 animate-in fade-in zoom-in duration-150">
+                    <div className="px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 mb-1">
+                      <p className="text-sm font-semibold text-zinc-900 dark:text-slate-100 truncate">
+                        {dashboardData?.user.name ?? user?.name ?? 'Developer'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        logout().then(() => {
+                          navigate('/');
+                        });
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 flex items-center gap-2 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign Out
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -292,33 +318,33 @@ export function DashboardPage() {
                 const trendColor = repo.commit_trend_direction === 'down' ? 'text-rose-600 dark:text-rose-500' : repo.commit_trend_direction === 'up' ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500';
                 const barColor = repo.status === 'critical' ? '#ef4444' : repo.status === 'warning' ? '#f59e0b' : '#10b981';
                 return (
-              <div
-                key={repo.id}
-                className={`group bg-white dark:bg-[#111114] border border-[rgba(16,24,40,0.06)] dark:border-zinc-800 border-t-2 ${sc.bar} rounded-2xl p-5 relative overflow-hidden cursor-pointer shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] hover:-translate-y-1 hover:shadow-lg transition-all duration-300`}
-                onClick={() => navigate(`/repo/${repo.id}`)}
-              >
-                <div className="flex justify-between items-center">
-                  <div className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-slate-100" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>{repo.name}</div>
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${sc.badgeBg} ${sc.badge} border ${sc.badgeBorder}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${sc.dotColor}`} />{sc.label}
-                  </div>
-                </div>
-                <div className="mt-4 space-y-1">
-                  {repo.last_activity.slice(0, 2).map((act, ai) => (
-                    <div key={ai} className="flex items-center p-2 -mx-2 rounded-lg gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${agentColors[act.agent]?.replace('text-', 'bg-').split(' ')[0] ?? 'bg-zinc-400'}`} />
-                      <div className={`text-xs font-bold shrink-0 ${agentColors[act.agent] ?? 'text-zinc-500'}`}>{act.agent.charAt(0).toUpperCase() + act.agent.slice(1)} →</div>
-                      <div className={`text-[13px] font-medium flex-1 truncate ${severityFg[act.severity] ?? 'text-zinc-600 dark:text-zinc-400'}`}>{act.message}</div>
-                      <div className="text-[11px] font-medium text-zinc-400 dark:text-slate-500 shrink-0">{act.timestamp_ago}</div>
+                  <div
+                    key={repo.id}
+                    className={`group bg-white dark:bg-[#111114] border border-[rgba(16,24,40,0.06)] dark:border-zinc-800 border-t-2 ${sc.bar} rounded-2xl p-5 relative overflow-hidden cursor-pointer shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] hover:-translate-y-1 hover:shadow-lg transition-all duration-300`}
+                    onClick={() => navigate(`/repo/${repo.id}`)}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-slate-100" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>{repo.name}</div>
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${sc.badgeBg} ${sc.badge} border ${sc.badgeBorder}`}>
+                        <div className={`w-1.5 h-1.5 rounded-full ${sc.dotColor}`} />{sc.label}
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
-                  <div className="text-[10px] uppercase font-bold text-zinc-400 dark:text-slate-500 mb-1.5 tracking-wider">commit activity · 7d</div>
-                  <CommitBarChart data={repo.commit_sparkline} color={barColor} />
-                  <div className={`flex justify-end mt-1 text-xs font-bold ${trendColor}`}>{repo.commit_trend_label}</div>
-                </div>
-              </div>
+                    <div className="mt-4 space-y-1">
+                      {repo.last_activity.slice(0, 2).map((act, ai) => (
+                        <div key={ai} className="flex items-center p-2 -mx-2 rounded-lg gap-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${agentColors[act.agent]?.replace('text-', 'bg-').split(' ')[0] ?? 'bg-zinc-400'}`} />
+                          <div className={`text-xs font-bold shrink-0 ${agentColors[act.agent] ?? 'text-zinc-500'}`}>{act.agent.charAt(0).toUpperCase() + act.agent.slice(1)} →</div>
+                          <div className={`text-[13px] font-medium flex-1 truncate ${severityFg[act.severity] ?? 'text-zinc-600 dark:text-zinc-400'}`}>{act.message}</div>
+                          <div className="text-[11px] font-medium text-zinc-400 dark:text-slate-500 shrink-0">{act.timestamp_ago}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                      <div className="text-[10px] uppercase font-bold text-zinc-400 dark:text-slate-500 mb-1.5 tracking-wider">commit activity · 7d</div>
+                      <CommitBarChart data={repo.commit_sparkline} color={barColor} />
+                      <div className={`flex justify-end mt-1 text-xs font-bold ${trendColor}`}>{repo.commit_trend_label}</div>
+                    </div>
+                  </div>
                 );
               })}
 
