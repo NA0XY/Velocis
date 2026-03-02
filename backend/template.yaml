@@ -43,7 +43,7 @@ Globals:
   Api:
     Cors:
       AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-      AllowHeaders: "'Content-Type,Authorization,x-repo-owner,x-repo-name'"
+      AllowHeaders: "'Content-Type,Authorization,x-repo-owner,x-repo-name,Cookie,X-Requested-With'"
       AllowOrigin:  "'https://app.velocis.dev'"
       AllowCredentials: true
 
@@ -76,8 +76,8 @@ Resources:
   AuthInitiateFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler:     src/handlers/api/auth.initiateGithubOAuth
-      Description: GET /auth/github — Redirect to GitHub OAuth
+      Handler:     src/handlers/api/authGithub.handler
+      Description: GET /auth/github — Redirect to GitHub OAuth (session-cookie flow)
       Events:
         Api:
           Type: Api
@@ -89,8 +89,8 @@ Resources:
   AuthCallbackFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler:     src/handlers/api/auth.handleGithubCallback
-      Description: GET /auth/github/callback — Exchange OAuth code for JWT
+      Handler:     src/handlers/api/authGithubCallback.handler
+      Description: GET /auth/github/callback — Exchange OAuth code, set session cookie
       Events:
         Api:
           Type: Api
@@ -325,8 +325,6 @@ Resources:
 
   # ──────────────────────────────────────────────────────────────────────────
   # § 9 — CORTEX AGENT (SERVICE MAP)
-  # Route /repos/:repoId/cortex/services* is served by the new simplified handler.
-  # The rich internal graph format is still served by getCortexData.ts (advanced use).
   # ──────────────────────────────────────────────────────────────────────────
 
   CortexListServicesFunction:
@@ -369,7 +367,6 @@ Resources:
             Path:   /repos/{repoId}/cortex/timeline
             Method: GET
 
-  # Internal advanced graph endpoint (kept for backward compatibility)
   GetCortexDataFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -499,7 +496,6 @@ Resources:
             Path:   /repos/{repoId}/infrastructure/generate
             Method: POST
 
-  # Internal advanced IaC endpoint (kept for backward compat with getCostForecast.ts)
   GetCostForecastFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -549,7 +545,26 @@ Resources:
             Method: GET
 
   # ──────────────────────────────────────────────────────────────────────────
-  # § 16 — GITHUB WEBHOOK (all event types)
+  # § 14 — SENTINEL MENTOR CHAT
+  # ──────────────────────────────────────────────────────────────────────────
+
+  PostChatMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/postChatMessage.handler
+      Description: POST /chat — Multilingual mentor chat via Bedrock
+      Timeout:     60
+      MemorySize:  512
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /chat
+            Method: POST
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # § 15 — GITHUB WEBHOOK
   # ──────────────────────────────────────────────────────────────────────────
 
   GithubWebhookFunction:
@@ -557,7 +572,7 @@ Resources:
     Properties:
       Handler:     src/handlers/webhooks/githubPush.handler
       Description: POST /webhooks/github — push, pull_request, deployment, ping
-      Timeout:     29        # Must respond to GitHub within 10s; use SQS for long work
+      Timeout:     29
       MemorySize:  512
       Events:
         Api:

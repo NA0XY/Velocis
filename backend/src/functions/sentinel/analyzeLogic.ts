@@ -71,7 +71,16 @@ import * as path from "path";
 /** Raw DynamoDB client used only for DynamoDBDocumentClient.from().
  *  The custom `dynamoClient` wrapper from dynamoClient.ts is not a
  *  DynamoDBClient instance and cannot be passed to .from(). */
-const _rawDynamo = new DynamoDBClient({});
+const _rawDynamo = new DynamoDBClient({
+  region: process.env.AWS_REGION ?? "ap-south-1",
+  ...(process.env.IS_LOCAL === "true" && {
+    endpoint: process.env.DYNAMO_LOCAL_ENDPOINT ?? "http://localhost:8000",
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "localdev",
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "localdev",
+    },
+  }),
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES
@@ -1320,10 +1329,13 @@ export async function runSentinelReview(codeDiff: string): Promise<string> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QUICK TEST — Execute with: npx ts-node src/functions/sentinel/analyzeLogic.ts
+// QUICK TEST — Execute standalone with:
+//   npx ts-node src/functions/sentinel/analyzeLogic.ts
+// DO NOT run this file as a module import — it will execute the test inline.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const mockSqlInjectionDiff = `
+if (require.main === module) {
+  const mockSqlInjectionDiff = `
 --- a/src/routes/users.ts
 +++ b/src/routes/users.ts
 @@ -12,7 +12,10 @@ router.get('/user', async (req, res) => {
@@ -1336,4 +1348,5 @@ const mockSqlInjectionDiff = `
  });
 `;
 
-runSentinelReview(mockSqlInjectionDiff).catch(console.error);
+  runSentinelReview(mockSqlInjectionDiff).catch(console.error);
+}

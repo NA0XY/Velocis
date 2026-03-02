@@ -15,6 +15,8 @@ import { randomUUID } from "crypto";
 
 // ── Handler imports ──────────────────────────────────────────────────────────
 import * as auth              from "./src/handlers/api/auth";
+import * as authGithub        from "./src/handlers/api/authGithub";
+import * as authGithubCallback from "./src/handlers/api/authGithubCallback";
 import * as getMe             from "./src/handlers/api/getMe";
 import * as getGithubRepos    from "./src/handlers/api/getGithubRepos";
 import * as installRepo       from "./src/handlers/api/installRepo";
@@ -30,6 +32,7 @@ import * as getCostForecast   from "./src/handlers/api/getCostForecast";
 import * as getActivity       from "./src/handlers/api/getActivity";
 import * as getSystemHealth   from "./src/handlers/api/getSystemHealth";
 import * as postChatMessage   from "./src/handlers/api/postChatMessage";
+import * as getRepos          from "./src/handlers/api/getRepos";
 import * as githubPush        from "./src/handlers/webhooks/githubPush";
 
 // ── App setup ────────────────────────────────────────────────────────────────
@@ -51,7 +54,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type,Authorization,x-repo-owner,x-repo-name,x-hub-signature-256,x-github-event"
+    "Content-Type,Authorization,x-repo-owner,x-repo-name,x-hub-signature-256,x-github-event,Cookie,X-Requested-With"
   );
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
   if (req.method === "OPTIONS") {
@@ -152,6 +155,19 @@ function wrap(handler: LambdaHandler, paramMap?: Record<string, string>) {
         }
       }
 
+      // Forward multi-value headers (used for multiple Set-Cookie headers)
+      // Each cookie must be appended individually — res.setHeader would overwrite
+      if (result.multiValueHeaders) {
+        for (const [k, values] of Object.entries(result.multiValueHeaders)) {
+          if (k.toLowerCase().startsWith("access-control-")) continue;
+          if (Array.isArray(values)) {
+            for (const v of values) {
+              res.append(k, String(v));
+            }
+          }
+        }
+      }
+
       res.status(result.statusCode);
 
       // If body looks like JSON, parse it so clients get a proper JSON response
@@ -175,16 +191,19 @@ function wrap(handler: LambdaHandler, paramMap?: Record<string, string>) {
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
-// § 1 — Authentication
-app.get ("/api/auth/github",          wrap(auth.initiateGithubOAuth as LambdaHandler));
-app.get ("/api/auth/github/callback", wrap(auth.handleGithubCallback as LambdaHandler));
+// § 1 — Authentication (session-cookie based OAuth)
+app.get ("/api/auth/github",          wrap(authGithub.handler as LambdaHandler));
+app.get ("/api/auth/github/callback", wrap(authGithubCallback.handler as LambdaHandler));
 app.post("/api/auth/logout",          wrap(auth.logout as LambdaHandler));
 
 // § 2 — User
 app.get("/api/me", wrap(getMe.handler as LambdaHandler));
 
 // § 3 — GitHub repositories
-app.get("/api/github/repos", wrap(getGithubRepos.handler as LambdaHandler));
+// /api/repos  — session-cookie auth (new OAuth flow)
+// /api/github/repos — JWT Bearer auth (legacy, kept for backward compat)
+app.get("/api/repos",         wrap(getRepos.handler as LambdaHandler));
+app.get("/api/github/repos",  wrap(getGithubRepos.handler as LambdaHandler));
 
 // § 4 — Onboarding / Installation
 app.post("/api/repos/:repoId/install",        wrap(installRepo.installRepo as LambdaHandler));
