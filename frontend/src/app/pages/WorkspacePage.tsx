@@ -6,6 +6,7 @@ import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle,
 import { useNavigate, useParams } from 'react-router';
 import Editor from '@monaco-editor/react';
 import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode } from '../../lib/api';
+import { translateText } from '../../lib/translate';
 
 const INITIAL_FILE = '/src/auth.controller.ts';
 
@@ -263,22 +264,40 @@ export function WorkspacePage() {
     }
   };
 
-  const handleLanguageChange = (newLang: 'en' | 'hi' | 'ta') => {
+  // Translate all chat messages to the selected language (Hindi/Telugu)
+  const handleLanguageChange = async (newLang: 'en' | 'hi' | 'ta') => {
     setLanguage(newLang);
+    if (newLang === 'en') return;
+    // Translate all current messages (only user/sentinel text, not analysis/reviewData)
+    const translatedMessages = await Promise.all(messages.map(async msg => {
+      if (!msg.content) return msg;
+      if (msg.role === 'sentinel' && (msg.reviewData || msg.isAnalysis)) return msg;
+      const translated = await translateText(msg.content!, newLang);
+      return { ...msg, content: translated };
+    }));
+    setMessages(translatedMessages);
   };
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !id) return;
     const text = inputValue;
-    const newMessage: Message = { role: 'user', content: text, timestamp: 'Just now' };
+    let translatedText = text;
+    if (language !== 'en') {
+      translatedText = await translateText(text, language);
+    }
+    const newMessage: Message = { role: 'user', content: translatedText, timestamp: 'Just now' };
     setMessages(prev => [...prev, newMessage]);
     setInputValue('');
     setIsSending(true);
     try {
       const res = await postChatMessage(id, { message: text, context: { file_path: selectedFile }, language });
+      let replyContent = res.content;
+      if (language !== 'en' && replyContent) {
+        replyContent = await translateText(replyContent, language);
+      }
       const reply: Message = {
         role: 'sentinel',
-        content: res.content,
+        content: replyContent,
         isAnalysis: res.is_analysis,
         analysisData: res.analysis ? {
           line: res.analysis.line,
