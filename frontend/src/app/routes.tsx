@@ -9,7 +9,7 @@ import { PipelinePage } from "./pages/PipelinePage";
 import { InfrastructurePage } from "./pages/InfrastructurePage";
 import { AuthPage } from "./pages/AuthPage";
 
-export const router = createBrowserRouter([
+export const routeConfig = [
   {
     path: "/auth",
     element: <AuthPage />,
@@ -46,4 +46,7 @@ export const router = createBrowserRouter([
     path: "/repo/:id/infrastructure",
     element: <InfrastructurePage />,
   },
-]);
+];
+
+// Convenience export for places that need the router singleton directly
+export const router = createBrowserRouter(routeConfig);

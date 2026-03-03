@@ -18,7 +18,7 @@ import {
   APIGatewayProxyEvent,
   APIGatewayProxyResult,
 } from "aws-lambda";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import * as jwt from "jsonwebtoken";
 import {
   DynamoDBDocumentClient,
@@ -38,6 +38,7 @@ import {
   extractBearerToken,
 } from "../../utils/apiResponse";
 import { revokeUserToken } from "../../services/github/auth";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNALS
@@ -208,8 +209,33 @@ export const handleGithubCallback = async (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function parseCookieValue(cookieHeader: string | undefined | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(";").map((c) => c.trim());
+  for (const cookie of cookies) {
+    const [key, ...valueParts] = cookie.split("=");
+    if (key?.trim() === name) return valueParts.join("=").trim() || null;
+  }
+  return null;
+}
+
+/** Build Set-Cookie headers that immediately expire both session cookies */
+function clearCookieHeaders(): string[] {
+  const isProduction = (process.env.NODE_ENV ?? "development") === "production";
+  const base = ["HttpOnly", "SameSite=Lax", "Max-Age=0", "Path=/", ...(isProduction ? ["Secure"] : [])];
+  return [
+    `velocis_session=; ${base.join("; ")}`,
+    `github_oauth_state=; ${base.join("; ")}`,
+  ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: POST /auth/logout
-// Invalidate the session by removing the GitHub token from DynamoDB.
+// Accepts BOTH session-cookie auth (new flow) and Bearer JWT (legacy).
+// Deletes the session record from DynamoDB and clears the browser cookie.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const logout = async (
@@ -217,8 +243,46 @@ export const logout = async (
 ): Promise<APIGatewayProxyResult> => {
   if (event.httpMethod === "OPTIONS") return preflight();
 
+  const cookieHeader = event.headers?.["cookie"] ?? event.headers?.["Cookie"];
+  const sessionToken = parseCookieValue(cookieHeader, "velocis_session");
+
+  // ── 1. Session-cookie auth (primary flow) ──────────────────────────────────
+  if (sessionToken) {
+    try {
+      const sessionTokenHash = createHash("sha256").update(sessionToken).digest("hex");
+      const sessionKey = `session_${sessionTokenHash}`;
+
+      // Delete the session record so it can't be reused
+      await dynamoClient.remove({
+        tableName: DYNAMO_TABLES.USERS,
+        key: { userId: sessionKey },
+      });
+
+      logger.info({ msg: "User logged out via session cookie" });
+    } catch (e) {
+      // Non-fatal — session may have already expired; still clear the cookie
+      logger.warn({ msg: "Could not delete session record on logout", error: String(e) });
+    }
+
+    return {
+      statusCode: 204,
+      multiValueHeaders: { "Set-Cookie": clearCookieHeaders() },
+      headers: {},
+      body: "",
+    };
+  }
+
+  // ── 2. Bearer JWT auth (legacy flow) ──────────────────────────────────────
   const token = extractBearerToken(event.headers?.Authorization ?? event.headers?.authorization);
-  if (!token) return errors.unauthorized();
+  if (!token) {
+    // No auth at all — still clear cookies so the browser is cleaned up
+    return {
+      statusCode: 204,
+      multiValueHeaders: { "Set-Cookie": clearCookieHeaders() },
+      headers: {},
+      body: "",
+    };
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as { sub: string };
@@ -235,9 +299,20 @@ export const logout = async (
       new DeleteCommand({ TableName: USERS_TABLE, Key: { id: userId } })
     );
 
-    logger.info({ userId, msg: "User logged out" });
-    return { statusCode: 204, headers: {}, body: "" };
+    logger.info({ userId, msg: "User logged out via JWT" });
+    return {
+      statusCode: 204,
+      multiValueHeaders: { "Set-Cookie": clearCookieHeaders() },
+      headers: {},
+      body: "",
+    };
   } catch (e) {
-    return errors.unauthorized("Token is invalid or already expired.");
+    // Invalid token — still clear cookies
+    return {
+      statusCode: 204,
+      multiValueHeaders: { "Set-Cookie": clearCookieHeaders() },
+      headers: {},
+      body: "",
+    };
   }
 };

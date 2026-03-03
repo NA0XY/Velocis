@@ -5,20 +5,33 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, CheckCircle, Lock, Eye, Shield, GitBranch, Loader2, Home, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../lib/auth';
+import { getSessionRepos, installRepo as apiInstallRepo, getInstallStatus } from '../../lib/api';
 
-// Mock repo — replace with API call once backend auth is live
-const MOCK_REPOS = [
-  {
-    github_id: 1,
-    name: 'velocis-commerce',
-    visibility: 'private',
-    language: 'TypeScript',
-    language_color: '#3178c6',
-    updated_at: '2026-03-01T00:00:00Z',
-    velocis_installed: false,
-    description: 'Modern e-commerce platform with AI-powered recommendations',
-  },
-];
+// Language → colour mapping (mirrors the backend constant)
+const LANGUAGE_COLORS: Record<string, string> = {
+  TypeScript: '#3178c6',
+  JavaScript: '#f1e05a',
+  Python: '#3572A5',
+  Go: '#00ADD8',
+  Rust: '#dea584',
+  Java: '#b07219',
+  'C#': '#178600',
+  Ruby: '#701516',
+  PHP: '#4F5D95',
+  Swift: '#F05138',
+  Kotlin: '#A97BFF',
+};
+
+interface Repo {
+  github_id: number;
+  name: string;
+  visibility: 'public' | 'private';
+  language: string;
+  language_color: string;
+  updated_at: string;
+  velocis_installed: boolean;
+  description: string | null;
+}
 
 export function OnboardingPage() {
   const navigate = useNavigate();
@@ -31,10 +44,41 @@ export function OnboardingPage() {
   const [installComplete, setInstallComplete] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
 
-  // Mock repo list — replace with getGithubRepos() once backend auth is live
-  const [repositories, setRepositories] = useState(MOCK_REPOS);
-  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
-  const [reposError] = useState<string | null>(null);
+  const [repositories, setRepositories] = useState<Repo[]>([]);
+  const [isLoadingRepos, setIsLoadingRepos] = useState(true);
+  const [reposError, setReposError] = useState<string | null>(null);
+
+  // Fetch real repos from GitHub via the session-cookie API
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingRepos(true);
+    setReposError(null);
+
+    getSessionRepos()
+      .then(({ repos }) => {
+        if (cancelled) return;
+        const mapped: Repo[] = repos.map((r) => ({
+          github_id: r.id,
+          name: r.name,
+          visibility: r.isPrivate ? 'private' : 'public',
+          language: r.language ?? 'Unknown',
+          language_color: LANGUAGE_COLORS[r.language ?? ''] ?? '#8b949e',
+          updated_at: r.updatedAt,
+          velocis_installed: false,
+          description: r.description,
+        }));
+        setRepositories(mapped);
+      })
+      .catch((err: Error) => {
+        if (cancelled) return;
+        setReposError(err.message ?? 'Failed to load repositories. Please refresh.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingRepos(false);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
 
   const [installSteps, setInstallSteps] = useState<{ label: string; status: string }[]>([
     { label: 'Registering GitHub webhook', status: 'queued' },
@@ -47,35 +91,75 @@ export function OnboardingPage() {
     repo.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Simulated install — steps complete one by one, then navigate to dashboard
-  const handleInstall = (repo: typeof MOCK_REPOS[0]) => {
+  // Real install — calls backend API then polls for step progress
+  const handleInstall = async (repo: Repo) => {
     setSelectedRepo(repo.name);
     setSelectedRepoGithubId(repo.github_id);
     setIsInstalling(true);
     setInstallComplete(false);
     setCurrentStep(0);
 
-    const steps = [
-      'Registering GitHub webhook',
-      'Initializing Sentinel',
-      'Provisioning Fortress QA loop',
-      'Activating Visual Cortex',
+    const resetSteps = [
+      { label: 'Registering GitHub webhook', status: 'queued' },
+      { label: 'Initializing Sentinel', status: 'queued' },
+      { label: 'Provisioning Fortress QA loop', status: 'queued' },
+      { label: 'Activating Visual Cortex', status: 'queued' },
     ];
-
-    const resetSteps = steps.map(label => ({ label, status: 'queued' }));
     setInstallSteps(resetSteps);
 
-    steps.forEach((_, idx) => {
-      setTimeout(() => {
-        setInstallSteps(prev =>
-          prev.map((s, i) => i === idx ? { ...s, status: 'complete' } : s)
+    try {
+      // Kick off the backend install job
+      await apiInstallRepo(repo.github_id, {
+        repoName: repo.name,
+        language: repo.language !== 'Unknown' ? repo.language : undefined,
+      });
+    } catch (err) {
+      // If already installed, treat as success and continue polling
+      const msg = String(err);
+      if (!msg.includes('already') && !msg.includes('409')) {
+        console.error('Install failed to start:', err);
+        setIsInstalling(false);
+        return;
+      }
+    }
+
+    // Poll the backend every 900 ms until complete or failed
+    const poll = setInterval(async () => {
+      try {
+        const statusRes = await getInstallStatus(repo.github_id);
+        const steps = statusRes.steps ?? [];
+        const overallStatus = statusRes.overall_status ?? statusRes.status;
+
+        // Map backend step statuses to UI
+        setInstallSteps(
+          resetSteps.map((uiStep) => {
+            const backendStep = steps.find((s) => uiStep.label === s.label);
+            return { ...uiStep, status: backendStep?.status ?? 'queued' };
+          })
         );
-        setCurrentStep(idx + 1);
-        if (idx === steps.length - 1) {
+
+        const completedCount = steps.filter((s) => s.status === 'complete').length;
+        setCurrentStep(completedCount);
+
+        if (overallStatus === 'complete') {
+          clearInterval(poll);
+          // Mark all steps complete in the UI
+          setInstallSteps(resetSteps.map((s) => ({ ...s, status: 'complete' })));
+          setCurrentStep(resetSteps.length);
           setInstallComplete(true);
+          // Mark repo as installed in the list
+          setRepositories((prev) =>
+            prev.map((r) =>
+              r.github_id === repo.github_id ? { ...r, velocis_installed: true } : r
+            )
+          );
+        } else if (overallStatus === 'failed') {
+          clearInterval(poll);
         }
-      }, (idx + 1) * 900);
-    });
+      } catch (pollErr) {
+        console.error('Status poll error:', pollErr);
+      }
+    }, 900);
   };
 
   const themeClass = isDarkMode ? 'dark' : '';

@@ -311,6 +311,20 @@ async function getGitHubLogin(githubToken: string): Promise<string | null> {
   }
 }
 
+/** Resolves the GitHub repo slug (e.g. "my-repo") from the Velocis internal repoId
+ *  by looking up the registered record in DynamoDB. Returns null on any failure. */
+async function resolveRepoName(repoId: string): Promise<string | null> {
+  try {
+    const rec = await dynamoClient.get<{ repoName?: string }>({
+      tableName: DYNAMO_TABLES.REPOSITORIES,
+      key: { repoId },
+    });
+    return rec?.repoName ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: GET /repos/:repoId/workspace/files
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,7 +344,10 @@ export const listFiles = async (
   const isRecursive = event.queryStringParameters?.recursive === "true";
 
   let owner = event.headers?.["x-repo-owner"] ?? "";
-  const name = event.headers?.["x-repo-name"] ?? repoId;
+  const headerName = event.headers?.["x-repo-name"] ?? "";
+  // Fall back to the stored GitHub slug from DynamoDB when the header is absent,
+  // rather than using the raw Velocis repoId (which may be a numeric GitHub ID).
+  const name = headerName || (await resolveRepoName(repoId)) || repoId;
 
   if (!owner) {
     const inferredOwner = await getGitHubLogin(user.githubToken);
@@ -383,7 +400,9 @@ export const getFileContent = async (
   if (!filePath) return errors.badRequest("Missing path query parameter.");
 
   let owner = event.headers?.["x-repo-owner"] ?? "";
-  const name = event.headers?.["x-repo-name"] ?? repoId;
+  const headerName2 = event.headers?.["x-repo-name"] ?? "";
+  const name = headerName2 || (await resolveRepoName(repoId)) || repoId;
+
   if (!owner) {
     const inferredOwner = await getGitHubLogin(user.githubToken);
     if (inferredOwner) owner = inferredOwner;

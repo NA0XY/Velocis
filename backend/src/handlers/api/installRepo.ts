@@ -214,10 +214,21 @@ export const installRepo = async (
   const repoId = event.pathParameters?.repoId;
   if (!repoId) return errors.badRequest("Missing repoId path parameter.");
 
-  // Check if already installed (in-memory)
+  // Check if already installed — first check in-memory, then DynamoDB
+  // (in-memory check fails after server restarts, so DynamoDB is authoritative)
   const existingJobs = findJobsForRepo(repoId, user.userId);
   if (existingJobs.some((j) => j.overallStatus === "complete")) {
     return errors.alreadyInstalled(repoId);
+  }
+  try {
+    const existingRepo = await dynamoClient.get<{ repoId: string }>({      tableName: DYNAMO_TABLES.REPOSITORIES,
+      key: { repoId },
+    });
+    if (existingRepo) {
+      return errors.alreadyInstalled(repoId);
+    }
+  } catch (_) {
+    // Non-fatal — if DynamoDB is unavailable, proceed with install
   }
 
   const jobId = `job_${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 16)}`;

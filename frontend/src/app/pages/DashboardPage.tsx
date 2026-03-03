@@ -248,8 +248,9 @@ export function DashboardPage() {
                     </div>
                     <button
                       onClick={() => {
-                        logout().then(() => {
-                          navigate('/');
+                        logout().finally(() => {
+                          // Hard-redirect to clear all cookies and React state
+                          window.location.href = '/auth';
                         });
                       }}
                       className="w-full text-left px-4 py-2 text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 flex items-center gap-2 transition-colors"

@@ -159,8 +159,15 @@ export interface InstallJobResponse {
   overall_status?: 'queued' | 'in_progress' | 'complete' | 'failed';
 }
 
-export const installRepo = (repoId: number | string): Promise<InstallJobResponse> =>
-  request(`/api/repos/${repoId}/install`, { method: 'POST' });
+export const installRepo = (
+  repoId: number | string,
+  body?: { repoName?: string; language?: string }
+): Promise<InstallJobResponse> =>
+  request(`/api/repos/${repoId}/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
 export const getInstallStatus = (repoId: number | string): Promise<InstallJobResponse> =>
   request(`/api/repos/${repoId}/install/status`);
@@ -304,6 +311,8 @@ export interface PipelineStep {
   state: StepState;
   duration_s: number | null;
   description: string;
+  /** Rich data written by executeFortressPipeline — file name, test counts, Claude explanation etc. */
+  stepData?: Record<string, unknown>;
 }
 
 export interface PipelineRun {

@@ -21,7 +21,7 @@ import { verifySignature } from "../../middlewares/verifySignature";
 import { validatePayload } from "../../middlewares/validatePayload";
 import { githubPushSchema } from "../../models/schemas/githubSchemas";
 import { analyzeLogic } from "../../functions/sentinel/analyzeLogic";
-import { writeTests } from "../../functions/fortress/writeTests";
+import { generateQATestPlan, generateAPIDocs } from "../../functions/fortress/analyzeFortress";
 import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
 import { dynamoClient } from "../../services/database/dynamoClient";
 import { repoOps } from "../../services/github/repoOps";
@@ -469,27 +469,22 @@ async function runAgentPipeline(ctx: {
     cortexStatus: cortex.status,
   });
 
-  // ── Phase B: Fortress TDD — runs after Sentinel ───────────────────────────
-  // We pass Sentinel's review output to Fortress so test generation is
-  // context-aware of flagged issues.
-  logger.info({ requestId, msg: "Phase B: Launching Fortress TDD pipeline" });
+  // ── Phase B: Fortress Analysis — runs after Sentinel ───────────────────────
+  // QA Strategist generates a test plan; API Documenter produces API docs.
+  // Both run in parallel against the combined changed file contents.
+  logger.info({ requestId, msg: "Phase B: Launching Fortress analysis pipeline" });
+
+  const combinedContent = Object.entries(fileContents)
+    .map(([path, content]) => `// File: ${path}\n${content}`)
+    .join("\n\n");
 
   let fortress: AgentResult;
   try {
-    const fortressOutput = await withTimeout(
-      writeTests({
-        repoId,
-        repoOwner: repoFullName.split("/")[0] ?? "",
-        repoName:  repoFullName.split("/")[1] ?? "",
-        filePath:  uniqueChangedFiles[0] ?? "",
-        commitSha: String(repoId),
-        accessToken: installationToken,
-        maxAttempts: 3,
-      }),
-      AGENT_TIMEOUT_MS,
-      "Fortress"
-    );
-    fortress = { status: "success", data: fortressOutput };
+    const [qaTestPlan, apiDocs] = await Promise.all([
+      withTimeout(generateQATestPlan(combinedContent), AGENT_TIMEOUT_MS, "Fortress-QA"),
+      withTimeout(generateAPIDocs(combinedContent), AGENT_TIMEOUT_MS, "Fortress-Docs"),
+    ]);
+    fortress = { status: "success", data: { qaTestPlan, apiDocs } };
   } catch (err) {
     logger.error({ requestId, msg: "Fortress agent failed", err });
     fortress = { status: "failed", error: String(err), data: null };

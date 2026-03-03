@@ -208,8 +208,17 @@ export const handler = async (
       }));
   } catch (_) { /* non-fatal */ }
 
+  // ── Deduplicate repos by repoId (guards against duplicate DynamoDB records)
+  const seen = new Set<string>();
+  const uniqueRepos = repos.filter((r) => {
+    const id = String(r.repoId ?? r.repoSlug ?? r.id ?? "");
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
   // ── Shape repo cards ─────────────────────────────────────────────────────────
-  const repoDashCards = repos.map((r) => ({
+  const repoDashCards = uniqueRepos.map((r) => ({
     id: r.repoSlug ?? r.repoId,
     name: r.repoName ?? r.repoSlug,
     status: r.status ?? "healthy",
