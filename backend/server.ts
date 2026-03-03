@@ -34,6 +34,7 @@ import * as getSystemHealth from "./src/handlers/api/getSystemHealth";
 import * as postChatMessage from "./src/handlers/api/postChatMessage";
 import * as getRepos from "./src/handlers/api/getRepos";
 import * as githubPush from "./src/handlers/webhooks/githubPush";
+import * as predictInfrastructure from "./src/handlers/api/predictInfrastructure";
 
 // ── App setup ────────────────────────────────────────────────────────────────
 const app = express();
@@ -276,6 +277,7 @@ app.get("/api/repos/:repoId/infrastructure", wrap(getInfrastructure.getInfrastru
 app.get("/api/repos/:repoId/infrastructure/terraform", wrap(getInfrastructure.getTerraform as LambdaHandler));
 app.post("/api/repos/:repoId/infrastructure/generate", wrap(getInfrastructure.generateInfrastructure as LambdaHandler));
 app.get("/api/repos/:repoId/infrastructure/forecast", wrap(getCostForecast.handler as LambdaHandler));
+app.post("/api/infrastructure/predict", wrap(predictInfrastructure.handler as LambdaHandler));
 
 // § 12 — Activity feed
 app.get("/api/activity", wrap(getActivity.handler as LambdaHandler));

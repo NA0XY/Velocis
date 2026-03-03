@@ -547,6 +547,27 @@ export const generateIac = (
     body: JSON.stringify({ environment, branch }),
   });
 
+// ─── 11b. Infrastructure Prediction (IaC Predictor) ───────────────────────────
+export interface InfraPredictionData {
+  impactSummary: string[];
+  iacCode: string;
+  costProjection: string;
+  confidenceScore: number;
+}
+
+export interface InfraPredictionResponse {
+  status: 'success';
+  data: InfraPredictionData;
+}
+
+export const predictInfrastructure = (
+  codeContent: string,
+): Promise<InfraPredictionResponse> =>
+  request('/api/infrastructure/predict', {
+    method: 'POST',
+    body: JSON.stringify({ codeContent }),
+  });
+
 // ─── 12. Activity Feed ────────────────────────────────────────────────────────
 export const getActivity = (params?: {
   agent?: AgentName;
