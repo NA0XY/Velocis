@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, CheckCircle, Lock, Eye, Shield, GitBranch, Loader2, Home, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../lib/auth';
-import { getSessionRepos, installRepo as apiInstallRepo, getInstallStatus } from '../../lib/api';
+import { getSessionRepos, installRepo as apiInstallRepo, getInstallStatus, getDashboard } from '../../lib/api';
 
 // Language → colour mapping (mirrors the backend constant)
 const LANGUAGE_COLORS: Record<string, string> = {
@@ -48,25 +48,39 @@ export function OnboardingPage() {
   const [isLoadingRepos, setIsLoadingRepos] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
 
-  // Fetch real repos from GitHub via the session-cookie API
+  // Fetch real repos from GitHub via the session-cookie API and mark installed ones
   useEffect(() => {
     let cancelled = false;
     setIsLoadingRepos(true);
     setReposError(null);
 
-    getSessionRepos()
-      .then(({ repos }) => {
+    Promise.all([
+      getSessionRepos(),
+      getDashboard()
+    ])
+      .then(([sessionRepos, dashboard]) => {
         if (cancelled) return;
-        const mapped: Repo[] = repos.map((r) => ({
-          github_id: r.id,
-          name: r.name,
-          visibility: r.isPrivate ? 'private' : 'public',
-          language: r.language ?? 'Unknown',
-          language_color: LANGUAGE_COLORS[r.language ?? ''] ?? '#8b949e',
-          updated_at: r.updatedAt,
-          velocis_installed: false,
-          description: r.description,
-        }));
+        // Build a set of installed repo IDs from dashboard
+        const installedRepoIds = new Set(
+          (dashboard.repos || []).map(r => {
+            // Try to match by GitHub repo id if available, else by name
+            // Dashboard repo id may be string, sessionRepos id is number
+            return String(r.id);
+          })
+        );
+        const mapped: Repo[] = sessionRepos.repos.map((r) => {
+          const isInstalled = installedRepoIds.has(String(r.id)) || installedRepoIds.has(String(r.name));
+          return {
+            github_id: r.id,
+            name: r.name,
+            visibility: r.isPrivate ? 'private' : 'public',
+            language: r.language ?? 'Unknown',
+            language_color: LANGUAGE_COLORS[r.language ?? ''] ?? '#8b949e',
+            updated_at: r.updatedAt,
+            velocis_installed: isInstalled,
+            description: r.description,
+          };
+        });
         setRepositories(mapped);
       })
       .catch((err: Error) => {
@@ -270,19 +284,28 @@ export function OnboardingPage() {
                 Your repositories
               </h2>
 
-              {/* Search input */}
-              <div className="relative">
-                <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 dark:text-slate-500"
-                />
-                <input
-                  type="text"
-                  placeholder="Search repositories…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 rounded-[10px] border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-slate-800/50 text-zinc-900 dark:text-slate-100 placeholder:text-zinc-400 dark:placeholder:text-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
-                />
-              </div>
+              {/* Search input + Open Dashboard button */}
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 dark:text-slate-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search repositories…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10 pr-4 py-2 rounded-[10px] border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-slate-800/50 text-zinc-900 dark:text-slate-100 placeholder:text-zinc-400 dark:placeholder:text-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
+                    />
+                  </div>
+                  <button
+                    onClick={() => navigate('/dashboard')}
+                    className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg"
+                    style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
+                  >
+                    Open Dashboard
+                  </button>
+                </div>
             </div>
 
             {/* Repo list */}
@@ -341,16 +364,27 @@ export function OnboardingPage() {
                     </div>
 
                     {/* Right side - Install button */}
-                    <motion.button
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleInstall(repo)}
-                      disabled={repo.velocis_installed}
-                      className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
-                    >
-                      {repo.velocis_installed ? 'Installed' : 'Install Velocis'}
-                    </motion.button>
+                    {repo.velocis_installed ? (
+                      <motion.button
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate(`/repo/${repo.github_id}`)}
+                        className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg"
+                        style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
+                      >
+                        Open
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => handleInstall(repo)}
+                        className="px-6 py-2.5 rounded-[10px] font-medium text-[14px] transition-all hover:shadow-lg"
+                        style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
+                      >
+                        Install Velocis
+                      </motion.button>
+                    )}
                   </motion.div>
                 ))
               )}
