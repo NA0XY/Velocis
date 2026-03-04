@@ -298,7 +298,7 @@ function ServiceNode({ data }: { data: ServiceData }) {
   const config = statusConfig[data.status];
   const layer  = layerConfig[data.layer];
   const StatusIcon = config.icon;
-  const width = Math.max(320, Math.min(420, 320 + data.metrics.complexity * 1.2));
+  const width = 360; // Fixed width matches SERVICE_W layout constant → no overlap
   const fileGroups = data.files.reduce((acc, f) => {
     const ext = f.split('.').pop()?.toLowerCase() || 'other';
     acc[ext] = (acc[ext] || 0) + 1; return acc;
@@ -315,8 +315,16 @@ function ServiceNode({ data }: { data: ServiceData }) {
   return (
     <div className={`rounded-xl border-2 ${config.border} backdrop-blur-sm shadow-xl hover:shadow-2xl transition-all duration-200 cursor-pointer group relative overflow-hidden`}
          style={{ width, padding: 0 }}>
-      <Handle type="target" position={Position.Top}    className="w-3 h-3 !bg-blue-500 border-2 border-white" />
-      <Handle type="source" position={Position.Bottom} className="w-3 h-3 !bg-blue-500 border-2 border-white" />
+      {/* Handles: source exits at 38% of edge length, target enters at 62%
+          so A→B and B→A travel on separate parallel tracks and never overlap */}
+      <Handle id="s-top"    type="source" position={Position.Top}    style={{ left: '38%',  opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="t-top"    type="target" position={Position.Top}    style={{ left: '62%',  opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="s-bottom" type="source" position={Position.Bottom} style={{ left: '38%',  opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="t-bottom" type="target" position={Position.Bottom} style={{ left: '62%',  opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="s-right"  type="source" position={Position.Right}  style={{ top: '38%',   opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="t-right"  type="target" position={Position.Right}  style={{ top: '62%',   opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="s-left"   type="source" position={Position.Left}   style={{ top: '62%',   opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
+      <Handle id="t-left"   type="target" position={Position.Left}   style={{ top: '38%',   opacity: 0, width: 1, height: 1, minWidth: 0, minHeight: 0, border: 0 }} />
       <div className={`h-1.5 ${layer.accent}`} />
       {data.status === 'critical' && <div className="absolute inset-0 rounded-xl border-2 border-red-500 animate-ping opacity-20" />}
       <div className={`p-4 ${config.bg} ${layer.bg}`}>
@@ -447,8 +455,189 @@ function ServiceNode({ data }: { data: ServiceData }) {
 }
 
 /* ═══════════════════════════════════════════
-   DAGRE LAYOUT
+   SWIMLANE BACKDROP NODE
 ═══════════════════════════════════════════ */
+const LANE_META = {
+  edge:    { label: 'API Layer',      dot: '#60a5fa', bg: 'rgba(59,130,246,0.06)',  border: 'rgba(59,130,246,0.25)'  },
+  compute: { label: 'Business Logic', dot: '#a78bfa', bg: 'rgba(139,92,246,0.06)', border: 'rgba(139,92,246,0.25)' },
+  data:    { label: 'Data Layer',     dot: '#22d3ee', bg: 'rgba(6,182,212,0.06)',   border: 'rgba(6,182,212,0.25)'   },
+};
+function SwimLaneNode({ data }: { data: { lane: keyof typeof LANE_META; width: number; height: number } }) {
+  const m = LANE_META[data.lane];
+  return (
+    <div style={{ width: data.width, height: data.height, background: m.bg,
+                  border: `1.5px solid ${m.border}`, borderRadius: 20, pointerEvents: 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 18px' }}>
+        <div style={{ width: 8, height: 8, borderRadius: '50%', background: m.dot, boxShadow: `0 0 8px ${m.dot}` }} />
+        <span style={{ color: m.dot, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{m.label}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   LAYOUT HELPERS
+═══════════════════════════════════════════ */
+
+/**
+ * Service layout — keeps 3 fixed swimlane rows (edge / compute / data) but orders
+ * nodes *within* each lane using the barycenter heuristic so that connected nodes
+ * land close to each other and edge crossings are minimised.
+ */
+const SERVICE_W   = 360;
+const SERVICE_H   = 460;
+const H_GAP       = 120; // horizontal gap — wide enough for edges to route through
+const V_ROW_GAP   = 80;  // vertical gap between rows inside a lane
+const LANE_GAP    = 220; // wide lane gap = routing channel between swimlanes
+const MAX_PER_ROW = 3;
+
+const getServiceLayout = (
+  nodes: Node[],
+  conns: Array<{ source: string; target: string }>,
+): { nodes: Node[]; swimlaneNodes: Node[] } => {
+  const LANES = ['edge', 'compute', 'data'] as const;
+  const byLayer = new Map<string, string[]>();
+  for (const lane of LANES) byLayer.set(lane, []);
+  for (const n of nodes) {
+    const layer = (n.data as ServiceData).layer ?? 'compute';
+    byLayer.get(layer)?.push(n.id);
+  }
+  const nodeById = new Map(nodes.map(n => [n.id, n]));
+
+  // Undirected adjacency
+  const adj = new Map<string, Set<string>>();
+  for (const n of nodes) adj.set(n.id, new Set());
+  for (const { source, target } of conns) {
+    adj.get(source)?.add(target);
+    adj.get(target)?.add(source);
+  }
+
+  // Temporary 1-D position for barycenter computation (index within lane)
+  const tempX = new Map<string, number>();
+  for (const [, ids] of byLayer) ids.forEach((id, i) => tempX.set(id, i));
+
+  // 4 passes of barycenter sorting
+  for (let iter = 0; iter < 4; iter++) {
+    for (const lane of LANES) {
+      const ids = byLayer.get(lane)!;
+      if (ids.length <= 1) continue;
+      const laneSet = new Set(ids);
+      const sorted = ids
+        .map(id => {
+          const crossNeighbors = [...(adj.get(id) ?? [])].filter(nb => !laneSet.has(nb));
+          const bary = crossNeighbors.length
+            ? crossNeighbors.reduce((s, nb) => s + (tempX.get(nb) ?? 0), 0) / crossNeighbors.length
+            : tempX.get(id) ?? 0;
+          return { id, bary };
+        })
+        .sort((a, b) => a.bary - b.bary);
+      const reordered = sorted.map(x => x.id);
+      byLayer.set(lane, reordered);
+      reordered.forEach((id, i) => tempX.set(id, i));
+    }
+  }
+
+  // Assign pixel positions — rows of MAX_PER_ROW, centred on x = 0
+  const CANVAS_PAD = 40;
+  const positionedNodes: Node[] = [];
+  const swimlaneNodes: Node[] = [];
+  let curY = 0;
+  for (const lane of LANES) {
+    const ids = byLayer.get(lane)!;
+    if (ids.length === 0) continue;
+    const laneStartY = curY;
+    const rows = Math.ceil(ids.length / MAX_PER_ROW);
+    // Compute max row width for this lane (last row may be shorter)
+    const maxRowCount = Math.min(ids.length, MAX_PER_ROW);
+    const maxRowW = maxRowCount * SERVICE_W + (maxRowCount - 1) * H_GAP;
+    for (let row = 0; row < rows; row++) {
+      const rowIds = ids.slice(row * MAX_PER_ROW, (row + 1) * MAX_PER_ROW);
+      const rowW   = rowIds.length * SERVICE_W + (rowIds.length - 1) * H_GAP;
+      const startX = -rowW / 2;
+      rowIds.forEach((id, i) => {
+        positionedNodes.push({ ...nodeById.get(id)!, position: { x: startX + i * (SERVICE_W + H_GAP), y: curY } });
+      });
+      curY += SERVICE_H + V_ROW_GAP;
+    }
+    const laneH = rows * SERVICE_H + (rows - 1) * V_ROW_GAP;
+    const laneW = maxRowW + CANVAS_PAD * 2;
+    swimlaneNodes.push({
+      id: `__lane_${lane}`,
+      type: 'swimLane',
+      position: { x: -(maxRowW / 2) - CANVAS_PAD, y: laneStartY - CANVAS_PAD },
+      data: { lane, width: laneW, height: laneH + CANVAS_PAD * 2 },
+      draggable: false,
+      selectable: false,
+      zIndex: -1,
+    });
+    curY += LANE_GAP;
+  }
+  return { nodes: positionedNodes, swimlaneNodes };
+};
+
+/** Edge colour palette — direction-aware */
+const EDGE_COLOR_FORWARD  = '#818cf8'; // indigo  — A→B rightward / downward
+const EDGE_COLOR_REVERSE  = '#2dd4bf'; // teal    — B→A leftward  / upward
+const EDGE_COLOR_BLAST    = '#fbbf24'; // amber   — blast radius
+const EDGE_COLOR_CRITICAL = '#f87171'; // red     — critical path
+
+/**
+ * Build edges with smart handle selection:
+ * - clearly above/below       → s-bottom → t-top  (or s-top → t-bottom)
+ * - same row, source left     → s-right  → t-left  (clean horizontal)
+ * - same row, source right    → s-left   → t-right
+ * - same row, same X          → s-bottom → t-bottom (loop under via lane gap)
+ */
+const buildSmartEdges = (
+  laidNodes: Node[],
+  connections: Array<{ source: string; target: string; isCritical: boolean; isBlast: boolean }>,
+): Edge[] => {
+  const posById = new Map(laidNodes.map(n => [n.id, n.position]));
+  return connections.map(({ source, target, isCritical, isBlast }) => {
+    const sp = posById.get(source);
+    const tp = posById.get(target);
+    let srcH = 'bottom', tgtH = 'top';
+    if (sp && tp) {
+      const dy = tp.y - sp.y;
+      const dx = tp.x - sp.x;
+      const SAME_ROW = Math.abs(dy) < SERVICE_H * 0.8;
+      if (SAME_ROW) {
+        if (Math.abs(dx) < 10) {
+          // Same position — loop under
+          srcH = 'bottom'; tgtH = 'bottom';
+        } else if (dx > 0) {
+          // Target is to the right
+          srcH = 'right'; tgtH = 'left';
+        } else {
+          // Target is to the left
+          srcH = 'left'; tgtH = 'right';
+        }
+      } else if (dy > 0) {
+        srcH = 'bottom'; tgtH = 'top';
+      } else {
+        srcH = 'top'; tgtH = 'bottom';
+      }
+    }
+    const isForward = srcH === 'right' || srcH === 'bottom';
+    const color = isCritical ? EDGE_COLOR_CRITICAL
+               : isBlast     ? EDGE_COLOR_BLAST
+               : isForward   ? EDGE_COLOR_FORWARD
+               :               EDGE_COLOR_REVERSE;
+    return {
+      id: `${source}-${target}`,
+      source, target,
+      sourceHandle: `s-${srcH}`,
+      targetHandle: `t-${tgtH}`,
+      type: 'smoothstep' as const,
+      pathOptions: { borderRadius: 16 },
+      animated: isCritical,
+      style: { stroke: color, strokeWidth: isCritical ? 2.5 : 1.5, opacity: 0.8 },
+      markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
+    };
+  });
+};
+
+/** Dagre layout used for the file-level drill-down view */
 const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
@@ -523,7 +712,21 @@ function CortexPageContent() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const { fitView } = useReactFlow();
-  const nodeTypes: NodeTypes = useMemo(() => ({ serviceNode: ServiceNode, fileNode: FileNode }), []);
+  // Keep a stable ref so useEffects can call fitView without listing it as a dep
+  const fitViewRef = useRef(fitView);
+  useEffect(() => { fitViewRef.current = fitView; });
+  const nodeTypes: NodeTypes = useMemo(() => ({ serviceNode: ServiceNode, fileNode: FileNode, swimLane: SwimLaneNode }), []);
+
+  // Auto-fit whenever the graph is (re)loaded — fires for both service and file views.
+  // 350 ms gives ReactFlow time to mount + measure node dimensions before we fit.
+  const prevNodeCount = useRef(0);
+  useEffect(() => {
+    if (nodes.length === 0) { prevNodeCount.current = 0; return; }
+    if (nodes.length === prevNodeCount.current) return; // same graph, skip
+    prevNodeCount.current = nodes.length;
+    const t = setTimeout(() => fitViewRef.current({ duration: 700, padding: 0.18 }), 350);
+    return () => clearTimeout(t);
+  }, [nodes.length]);
 
   /* ── Fetch data ─────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -535,8 +738,21 @@ function CortexPageContent() {
           getCortexServices(repoId),
           getCortexTimeline(repoId).catch(() => ({ events: [] })),
         ]);
-        // Include any service that has at least one file — LOC=0 is valid for config/infra services
-        const valid = res.services.filter((s: any) => s.metrics.file_count > 0) as ServiceData[];
+        // Step 1: services that have source files
+        const hasFiles = new Set(
+          (res.services as any[]).filter(s => s.metrics.file_count > 0).map(s => s.id.toString())
+        );
+        // Step 2: also include services that are TARGETS of those — they may have 0 files
+        //         (config/infra services) but are still real nodes used by others
+        const referencedIds = new Set<string>();
+        for (const svc of res.services as any[]) {
+          if (hasFiles.has(svc.id.toString())) {
+            for (const tid of svc.connections ?? []) referencedIds.add(tid.toString());
+          }
+        }
+        const valid = (res.services as ServiceData[]).filter(
+          s => hasFiles.has(s.id.toString()) || referencedIds.has(s.id.toString())
+        );
         if (valid.length === 0) { setError('No services with files found. Rebuild the Cortex graph first.'); setLoading(false); return; }
         // Build a full lookup map (ALL services, even those with 0 LOC) so dep-flow target
         // resolution never silently drops a connection whose target was filtered from display.
@@ -551,27 +767,29 @@ function CortexPageContent() {
 
         const flowNodes: Node[] = valid.map(svc => ({ id: svc.id.toString(), type: 'serviceNode', data: svc, position: { x: 0, y: 0 } }));
         const validIds = new Set(flowNodes.map(n => n.id));
-        const flowEdges: Edge[] = valid.flatMap(svc =>
-          svc.connections
-            .filter(tid => validIds.has(tid.toString()))
-            .map(tid => {
-              const isCrit = svc.status === 'critical';
-              return {
-                id: `${svc.id}-${tid}`, source: svc.id.toString(), target: tid.toString(),
-                type: 'smoothstep', animated: isCrit,
-                style: { stroke: isCrit ? '#ef4444' : '#64748b', strokeWidth: 2 },
-                markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20, color: isCrit ? '#ef4444' : '#64748b' },
-              };
-            })
+        const blastSet = new Set((res.blast_radius_pairs || []).map((p: any) => `${p.source_id}-${p.target_id}`));
+        // Build connections from ALL services (not just valid) so that connections
+        // from filtered-out services to visible nodes are also captured.
+        // Keep only edges where both endpoints are rendered nodes.
+        const rawConns = (res.services as any[]).flatMap(svc =>
+          (svc.connections ?? [])
+            .filter((tid: number) => validIds.has(svc.id.toString()) && validIds.has(tid.toString()))
+            .map((tid: number) => ({
+              source: svc.id.toString(), target: tid.toString(),
+              isCritical: svc.status === 'critical',
+              isBlast: blastSet.has(`${svc.id}-${tid}`),
+            }))
         );
-        const { nodes: ln, edges: le } = getLayoutedElements(flowNodes, flowEdges, 'TB');
-        setNodes(ln); setEdges(le);
+        const { nodes: serviceNodes, swimlaneNodes } = getServiceLayout(flowNodes, rawConns);
+        const ln = [...swimlaneNodes, ...serviceNodes]; // swimlanes render behind service nodes
+        const le = buildSmartEdges(ln.filter(n => n.type === 'serviceNode'), rawConns);
+        setNodes(ln); setEdges(le); // fitView fires via nodes.length watcher above
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load services');
       } finally { setLoading(false); }
     };
     fetchData();
-  }, [repoId, setNodes, setEdges]);
+  }, [repoId, setNodes, setEdges]); // fitView intentionally omitted — accessed via ref
 
   /* ── Auto-refresh ────────────────────────────────────────────────────── */
   useEffect(() => {
@@ -579,7 +797,10 @@ function CortexPageContent() {
     const iv = setInterval(async () => {
       try {
         const res = await getCortexServices(repoId);
-        const valid = res.services.filter((s: any) => s.metrics.file_count > 0) as ServiceData[];
+        const hasFiles = new Set((res.services as any[]).filter(s => s.metrics.file_count > 0).map(s => s.id.toString()));
+        const refIds   = new Set<string>();
+        for (const svc of res.services as any[]) { if (hasFiles.has(svc.id.toString())) { for (const tid of svc.connections ?? []) refIds.add(tid.toString()); } }
+        const valid = (res.services as ServiceData[]).filter(s => hasFiles.has(s.id.toString()) || refIds.has(s.id.toString()));
         allServicesById.current = new Map((res.services as ServiceData[]).map((s: ServiceData) => [s.id, s]));
         setServices(valid); setLastUpdated(res.last_updated_ago);
       } catch {}
@@ -591,9 +812,9 @@ function CortexPageContent() {
   const filteredNodes = useMemo(() => {
     let n = nodes;
     if (viewMode === 'services') {
-      if (hideHealthy) n = n.filter(nd => (nd.data as ServiceData).status !== 'healthy');
-      n = n.filter(nd => layerFilters[(nd.data as ServiceData).layer]);
-      if (searchQuery) n = n.map(nd => ({
+      if (hideHealthy) n = n.filter(nd => nd.type !== 'serviceNode' || (nd.data as ServiceData).status !== 'healthy');
+      n = n.filter(nd => nd.type !== 'serviceNode' || layerFilters[(nd.data as ServiceData).layer]);
+      if (searchQuery) n = n.map(nd => nd.type !== 'serviceNode' ? nd : ({
         ...nd,
         style: { ...nd.style, opacity: (nd.data as ServiceData).name.toLowerCase().includes(searchQuery.toLowerCase()) ? 1 : 0.25 },
       }));
@@ -607,7 +828,7 @@ function CortexPageContent() {
   }, [edges, filteredNodes]);
 
   /* ── Handlers ───────────────────────────────────────────────────────── */
-  const handleFitView   = useCallback(() => fitView({ duration: 800, padding: 0.2 }), [fitView]);
+  const handleFitView   = useCallback(() => fitViewRef.current({ duration: 800, padding: 0.2 }), []);
   const handleExport    = useCallback(async () => {
     try {
       const { toPng } = await import('html-to-image');
@@ -660,14 +881,13 @@ function CortexPageContent() {
         }));
         const g = new dagre.graphlib.Graph();
         g.setDefaultEdgeLabel(() => ({}));
-        g.setGraph({ rankdir: 'LR', ranksep: 120, nodesep: 60, marginx: 40, marginy: 40 });
-        fileFlowNodes.forEach(n => g.setNode(n.id, { width: 260, height: 180 }));
+        g.setGraph({ rankdir: 'LR', ranksep: 200, nodesep: 80, marginx: 60, marginy: 60 });
+        fileFlowNodes.forEach(n => g.setNode(n.id, { width: 260, height: 210 }));
         fileFlowEdges.forEach(e => g.setEdge(e.source, e.target));
         dagre.layout(g);
-        const laidOut = fileFlowNodes.map(n => { const p = g.node(n.id); return { ...n, position: { x: p.x - 130, y: p.y - 90 } }; });
+        const laidOut = fileFlowNodes.map(n => { const p = g.node(n.id); return { ...n, position: { x: p.x - 130, y: p.y - 105 } }; });
         setNodes(laidOut); setEdges(fileFlowEdges);
-        setViewMode('files'); setLoading(false);
-        setTimeout(() => fitView({ duration: 800, padding: 0.25 }), 100);
+        setViewMode('files'); setLoading(false); // fitView fires via nodes.length watcher above
       } catch { setLoading(false); }
     } else {
       const clicked = fileNodeDataList.find(f => f.id === node.id);
@@ -676,7 +896,7 @@ function CortexPageContent() {
         setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, isSelected: n.id === clicked.id } })));
       }
     }
-  }, [viewMode, repoId, fitView, setNodes, setEdges, fileNodeDataList]);
+  }, [viewMode, repoId, setNodes, setEdges, fileNodeDataList]); // fitView via ref — no dep needed
 
   const onConnect = useCallback((p: Connection) => setEdges(eds => addEdge(p, eds)), [setEdges]);
 
@@ -954,9 +1174,9 @@ function CortexPageContent() {
                   nodes={filteredNodes} edges={filteredEdges}
                   onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
                   onNodeClick={onNodeClick} onConnect={onConnect}
-                  nodeTypes={nodeTypes} fitView
+                  nodeTypes={nodeTypes}
                   style={{ background: isDark ? '#080a0f' : '#eef0f4' }}
-                  minZoom={0.1} maxZoom={2}
+                  minZoom={0.05} maxZoom={2}
                 >
                   <Background color={isDark ? '#1a1f2e' : '#c0c4cc'} gap={16} />
                   <Controls />
