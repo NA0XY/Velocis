@@ -156,6 +156,7 @@ export async function initOAuthFlow(
     scope: scopeString,
     state,
     allow_signup: "true",
+    prompt: "select_account",
   });
 
   const authorizationUrl = `https://github.com/login/oauth/authorize?${params_.toString()}`;
@@ -511,6 +512,7 @@ async function validateAndConsumeCsrfState(state: string): Promise<void> {
   const record = await dynamoClient.get<{ expiresAt: string }>({
     tableName: DYNAMO_TABLES.USERS,
     key: { userId: `csrf_${state}` },
+    consistentRead: true,   // Must be strongly consistent — state was just written milliseconds ago
   });
 
   if (!record) {

@@ -2,9 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle, Lightbulb, Info, Home, Folder, Sparkles, Zap, CheckCircle2, Activity } from 'lucide-react';
+import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle, Lightbulb, Info, Home, Folder, Sparkles, Zap, CheckCircle2, Activity, Search } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import Editor from '@monaco-editor/react';
+import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode } from '../../lib/api';
+import { translateText } from '../../lib/translate';
+
+const INITIAL_FILE = '/src/auth.controller.ts';
 
 const codeExample = `import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -63,6 +67,25 @@ interface Message {
     description: string;
     chips: string[];
   };
+  reviewData?: {
+    summary: string;
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    filesReviewed: number;
+    findings: Array<{
+      severity: 'critical' | 'warning' | 'info';
+      filePath: string;
+      line?: number;
+      title: string;
+      description: string;
+      fixSuggestion: string;
+    }>;
+  };
+  autoFix?: {
+    filePath: string;
+    reason: string;
+    fixedCode: string;
+  } | null;
+  autoFixApplied?: boolean;
   timestamp: string;
 }
 
@@ -125,9 +148,18 @@ export function WorkspacePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [language, setLanguage] = useState<'en' | 'hi' | 'ta'>('en');
-  const [messages, setMessages] = useState<Message[]>(regionalMessages[language]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
+  const [codeContent, setCodeContent] = useState<string>('');
+  const [annotations, setAnnotations] = useState<{ line: number; type: string; message: string }[]>([]);
+  const [isSending, setIsSending] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [allFiles, setAllFiles] = useState<WorkspaceFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
 
   // Dark mode state
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -135,46 +167,241 @@ export function WorkspacePage() {
   // Apply dark class to an enclosing wrapper
   const themeClass = isDarkMode ? 'dark' : '';
 
-  const repoName = id === 'infrazero' ? 'InfraZero' :
-    id === 'immersa' ? 'Immersa' :
-      id === 'velocis-core' ? 'velocis-core' :
-        id === 'ai-observatory' ? 'ai-observatory' :
-          id === 'distributed-lab' ? 'distributed-lab' :
-            'test-sandbox';
+  const repoName = id ?? 'Unknown';
 
-  const handleLanguageChange = (newLang: 'en' | 'hi' | 'ta') => {
+  // ─ Fetch initial data on mount ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!id) return;
+
+    getWorkspaceFiles(id, '/', true)
+      .then((wsRes) => {
+        const files = wsRes.files.filter(f => f.type === 'file');
+        setAllFiles(files);
+
+        const targetFile = files.find(f => f.path === INITIAL_FILE) ? INITIAL_FILE : files[0]?.path;
+
+        if (targetFile) {
+          setSelectedFile(targetFile);
+          Promise.all([
+            getFileContent(id, targetFile).catch(() => null),
+            getAnnotations(id, targetFile).catch(() => null),
+            getChatHistory(id, 20).catch(() => null),
+          ]).then(([fileRes, annotRes, chatRes]) => {
+            if (fileRes) setCodeContent(fileRes.content);
+            else setCodeContent('// Failed to load file content');
+
+            if (annotRes) {
+              setAnnotations(annotRes.annotations.map(a => ({
+                line: a.line,
+                type: a.type,
+                message: `${a.title}: ${a.message}`,
+              })));
+            }
+            if (chatRes) {
+              const mapped: Message[] = chatRes.messages.map(m => ({
+                role: (m.role === 'user' ? 'user' : 'sentinel') as 'sentinel' | 'user',
+                content: m.content,
+                isAnalysis: m.is_analysis,
+                analysisData: m.analysis ? {
+                  line: m.analysis.line,
+                  title: m.analysis.title,
+                  description: m.analysis.description,
+                  chips: m.analysis.suggestions,
+                } : undefined,
+                reviewData: m.review ? {
+                  summary: m.review.summary,
+                  riskLevel: m.review.risk_level,
+                  filesReviewed: m.review.files_reviewed,
+                  findings: m.review.findings.map(f => ({
+                    severity: f.severity,
+                    filePath: f.file_path,
+                    line: f.line,
+                    title: f.title,
+                    description: f.description,
+                    fixSuggestion: f.fix_suggestion,
+                  })),
+                } : undefined,
+                autoFix: m.auto_fix ? {
+                  filePath: m.auto_fix.file_path,
+                  reason: m.auto_fix.reason,
+                  fixedCode: m.auto_fix.fixed_code,
+                } : undefined,
+                timestamp: m.timestamp_ago,
+              }));
+              setMessages(mapped);
+            }
+          });
+        }
+      })
+      .catch(console.error);
+  }, [id]);
+
+  const loadFile = async (filePath: string) => {
+    if (!id || filePath === selectedFile) return;
+    setIsLoadingFile(true);
+    setSelectedFile(filePath);
+    try {
+      const [fileRes, annotRes] = await Promise.all([
+        getFileContent(id, filePath).catch(() => null),
+        getAnnotations(id, filePath).catch(() => null)
+      ]);
+      if (fileRes) setCodeContent(fileRes.content);
+      else setCodeContent('// Failed to load file content');
+
+      if (annotRes) {
+        setAnnotations(annotRes.annotations.map(a => ({
+          line: a.line,
+          type: a.type,
+          message: `${a.title}: ${a.message}`,
+        })));
+      } else {
+        setAnnotations([]);
+      }
+    } catch {
+      setCodeContent('// Error loading file');
+    } finally {
+      setIsLoadingFile(false);
+    }
+  };
+
+  // Translate all chat messages to the selected language (Hindi/Telugu)
+  const handleLanguageChange = async (newLang: 'en' | 'hi' | 'ta') => {
     setLanguage(newLang);
-    setMessages(regionalMessages[newLang]);
+    if (newLang === 'en') return;
+    // Translate all current messages (only user/sentinel text, not analysis/reviewData)
+    const translatedMessages = await Promise.all(messages.map(async msg => {
+      if (!msg.content) return msg;
+      if (msg.role === 'sentinel' && (msg.reviewData || msg.isAnalysis)) return msg;
+      const translated = await translateText(msg.content!, newLang);
+      return { ...msg, content: translated };
+    }));
+    setMessages(translatedMessages);
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim()) return;
-
-    const newMessage: Message = {
-      role: 'user',
-      content: inputValue,
-      timestamp: 'Just now'
-    };
-
-    setMessages([...messages, newMessage]);
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || !id) return;
+    const text = inputValue;
+    let translatedText = text;
+    if (language !== 'en') {
+      translatedText = await translateText(text, language);
+    }
+    const newMessage: Message = { role: 'user', content: translatedText, timestamp: 'Just now' };
+    setMessages(prev => [...prev, newMessage]);
     setInputValue('');
-
-    // Simulate Sentinel response
-    setTimeout(() => {
-      const sentinelResponse: Message = {
+    setIsSending(true);
+    try {
+      const res = await postChatMessage(id, { message: text, context: { file_path: selectedFile }, language });
+      let replyContent = res.content;
+      if (language !== 'en' && replyContent) {
+        replyContent = await translateText(replyContent, language);
+      }
+      const reply: Message = {
         role: 'sentinel',
-        content: language === 'en' ? "I can help you refactor this code. Let me analyze the surrounding logic first." : language === 'hi' ? "मैं इस code को refactor करने में आपकी मदद कर सकता हूं।" : "இந்த code ஐ refactor செய்ய நான் உங்களுக்கு உதவ முடியும்.",
-        timestamp: 'Just now'
+        content: replyContent,
+        isAnalysis: res.is_analysis,
+        analysisData: res.analysis ? {
+          line: res.analysis.line,
+          title: res.analysis.title,
+          description: res.analysis.description,
+          chips: res.analysis.suggestions,
+        } : undefined,
+        reviewData: res.review ? {
+          summary: res.review.summary,
+          riskLevel: res.review.risk_level,
+          filesReviewed: res.review.files_reviewed,
+          findings: res.review.findings.map(f => ({
+            severity: f.severity,
+            filePath: f.file_path,
+            line: f.line,
+            title: f.title,
+            description: f.description,
+            fixSuggestion: f.fix_suggestion,
+          })),
+        } : undefined,
+        autoFix: res.auto_fix ? {
+          filePath: res.auto_fix.file_path,
+          reason: res.auto_fix.reason,
+          fixedCode: res.auto_fix.fixed_code,
+        } : undefined,
+        timestamp: res.timestamp_ago,
       };
-      setMessages(prev => [...prev, sentinelResponse]);
-    }, 1000);
+      setMessages(prev => [...prev, reply]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'sentinel', content: 'Failed to get response. Please try again.', timestamp: 'Just now' }]);
+    } finally {
+      setIsSending(false);
+    }
   };
 
-  const annotations = [
-    { line: 15, type: 'warning', message: 'Sentinel: Potential race condition detected. Token generation needs rate limiting.' },
-    { line: 32, type: 'suggestion', message: 'Suggested refactor: Extract user validation into a separate method for better testability.' },
-    { line: 39, type: 'info', message: 'Consider adding proper error logging for production debugging.' }
-  ];
+  const handleReviewCode = async () => {
+    if (!id || isReviewing) return;
+    setIsReviewing(true);
+    try {
+      const reviewPrompt: Message = {
+        role: 'user',
+        content: 'Review the full repository and suggest fixes.',
+        timestamp: 'Just now',
+      };
+      setMessages(prev => [...prev, reviewPrompt]);
+
+      const res = await reviewWorkspaceCode(id, { language });
+      const reply: Message = {
+        role: 'sentinel',
+        content: res.content,
+        reviewData: res.review ? {
+          summary: res.review.summary,
+          riskLevel: res.review.risk_level,
+          filesReviewed: res.review.files_reviewed,
+          findings: res.review.findings.map(f => ({
+            severity: f.severity,
+            filePath: f.file_path,
+            line: f.line,
+            title: f.title,
+            description: f.description,
+            fixSuggestion: f.fix_suggestion,
+          })),
+        } : undefined,
+        autoFix: res.auto_fix ? {
+          filePath: res.auto_fix.file_path,
+          reason: res.auto_fix.reason,
+          fixedCode: res.auto_fix.fixed_code,
+        } : undefined,
+        timestamp: res.timestamp_ago,
+      };
+      setMessages(prev => [...prev, reply]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'sentinel', content: 'Review failed. Please try again.', timestamp: 'Just now' }]);
+    } finally {
+      setIsReviewing(false);
+    }
+  };
+
+  const handleAutoFix = (messageIndex: number) => {
+    const message = messages[messageIndex];
+    const fix = message?.autoFix;
+    if (!fix) return;
+
+    setSelectedFile(fix.filePath);
+    setCodeContent(fix.fixedCode);
+    setAnnotations([]);
+
+    if (!allFiles.some(f => f.path === fix.filePath)) {
+      setAllFiles(prev => [
+        ...prev,
+        {
+          name: fix.filePath.split('/').pop() || fix.filePath,
+          type: 'file',
+          path: fix.filePath,
+        },
+      ]);
+    }
+
+    setMessages(prev => prev.map((m, idx) => (
+      idx === messageIndex ? { ...m, autoFixApplied: true } : m
+    )));
+  };
+
+  // annotations come from API state (set in useEffect above)
 
   return (
     <div className={`${themeClass} w-full h-full`}>
@@ -236,11 +463,63 @@ export function WorkspacePage() {
             </div>
 
             {/* Center - File Context */}
-            <button className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all font-['JetBrains_Mono',_monospace] text-xs font-semibold text-zinc-700 dark:text-slate-300 group">
-              <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors" />
-              <span>auth-service / auth.controller.ts</span>
-              <ChevronDown className="w-4 h-4 text-zinc-400 dark:text-slate-500" />
-            </button>
+            <div className="relative hidden md:flex items-center justify-center">
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all font-['JetBrains_Mono',_monospace] text-xs font-semibold text-zinc-700 dark:text-slate-300 group"
+              >
+                <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors" />
+                <span className="truncate max-w-[200px]">{selectedFile.split('/').pop() || selectedFile}</span>
+                <ChevronDown className={`w-4 h-4 text-zinc-400 dark:text-slate-500 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              <AnimatePresence>
+                {isDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-[400px] bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-[100] flex flex-col"
+                  >
+                    <div className="p-2 border-b border-zinc-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-slate-800/50 rounded-lg border border-zinc-200/50 dark:border-slate-700/50">
+                        <Search className="w-3.5 h-3.5 text-zinc-400" />
+                        <input
+                          autoFocus
+                          type="text"
+                          placeholder="Search files..."
+                          value={fileSearchQuery}
+                          onChange={e => setFileSearchQuery(e.target.value)}
+                          className="bg-transparent border-none outline-none text-xs text-zinc-700 dark:text-slate-300 w-full placeholder:text-zinc-400"
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-[300px] overflow-y-auto p-1 scrollbar-thin scrollbar-thumb-zinc-200 dark:scrollbar-thumb-slate-700">
+                      {allFiles
+                        .filter(f => f.path.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+                        .map(f => (
+                          <button
+                            key={f.path}
+                            onClick={() => {
+                              setIsDropdownOpen(false);
+                              loadFile(f.path);
+                            }}
+                            className={`w-full text-left px-3 py-2 flex items-center text-xs font-['JetBrains_Mono',_monospace] hover:bg-zinc-50 dark:hover:bg-slate-800 rounded-md transition-colors ${selectedFile === f.path ? 'bg-indigo-50/50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-semibold' : 'text-zinc-600 dark:text-slate-400'}`}
+                          >
+                            <FileCode className="w-3.5 h-3.5 mr-2 shrink-0 opacity-70" />
+                            <span className="truncate" title={f.path}>{f.path}</span>
+                          </button>
+                        ))
+                      }
+                      {allFiles.filter(f => f.path.toLowerCase().includes(fileSearchQuery.toLowerCase())).length === 0 && (
+                        <div className="px-3 py-4 text-center text-xs text-zinc-500">No files found</div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Right - Actions */}
             <div className="flex items-center gap-3">
@@ -273,7 +552,7 @@ export function WorkspacePage() {
                 <div className="flex items-center gap-2">
                   <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
                   <span className="font-['JetBrains_Mono',_monospace] text-sm font-semibold text-zinc-800 dark:text-slate-200">
-                    auth.controller.ts
+                    {selectedFile.split('/').pop() || selectedFile}
                   </span>
                   <span className="text-zinc-300 dark:text-slate-700 mx-1 hidden sm:inline">•</span>
                   <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-zinc-200/50 dark:bg-slate-800 text-zinc-600 dark:text-slate-400 hidden sm:inline transition-colors">main</span>
@@ -290,14 +569,15 @@ export function WorkspacePage() {
             </div>
 
             {/* Editor Area */}
-            <div className="flex-1 overflow-auto bg-transparent relative z-10 pt-2 pb-0">
+            <div className={`flex-1 overflow-auto bg-transparent relative z-10 pt-2 pb-0 transition-opacity duration-300 ${isLoadingFile ? 'opacity-50' : 'opacity-100'}`}>
               <Editor
                 height="100%"
                 width="100%"
                 defaultLanguage="typescript"
                 theme={isDarkMode ? 'velocis-dark' : 'light'}
                 beforeMount={handleEditorWillMount}
-                value={codeExample}
+                value={codeContent}
+                onChange={(value) => setCodeContent(value ?? '')}
                 options={{
                   fontFamily: 'JetBrains Mono, monospace',
                   fontSize: 13,
@@ -344,17 +624,27 @@ export function WorkspacePage() {
                 </div>
               </div>
 
-              {/* Regional Mentorship Hub Toggle */}
-              <div className="bg-zinc-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg flex items-center border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
-                {(['en', 'hi', 'ta'] as const).map((lang) => (
-                  <button
-                    key={lang}
-                    onClick={() => handleLanguageChange(lang)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${language === lang ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-slate-600/50' : 'text-zinc-500 dark:text-slate-400 hover:text-zinc-700 dark:hover:text-slate-200'}`}
-                  >
-                    {lang === 'en' ? 'EN' : lang === 'hi' ? 'HI' : 'TA'}
-                  </button>
-                ))}
+              <div className="flex flex-col items-end gap-2">
+                {/* Regional Mentorship Hub Toggle */}
+                <div className="bg-zinc-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg flex items-center border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
+                  {(['en', 'hi', 'ta'] as const).map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => handleLanguageChange(lang)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${language === lang ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm border border-zinc-200/50 dark:border-slate-600/50' : 'text-zinc-500 dark:text-slate-400 hover:text-zinc-700 dark:hover:text-slate-200'}`}
+                    >
+                      {lang === 'en' ? 'EN' : lang === 'hi' ? 'HI' : 'TA'}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={handleReviewCode}
+                  disabled={isReviewing || !id}
+                  className="w-full min-w-[110px] px-3 py-1.5 rounded-lg bg-zinc-900 dark:bg-slate-100 text-white dark:text-slate-900 text-[11px] font-semibold disabled:opacity-50 hover:bg-zinc-800 dark:hover:bg-white transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{isReviewing ? 'Reviewing...' : 'Review Code'}</span>
+                </button>
               </div>
             </div>
 
@@ -373,7 +663,50 @@ export function WorkspacePage() {
                     <div className={`max-w-[95%] ${message.role === 'user' ? 'bg-zinc-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-2xl rounded-tr-sm px-4 py-3 shadow-md' : 'w-full'}`}>
 
                       {message.role === 'sentinel' ? (
-                        message.isAnalysis && message.analysisData ? (
+                        message.reviewData ? (
+                          <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-indigo-100/60 dark:border-indigo-500/20 shadow-[0_4px_20px_rgba(99,102,241,0.06)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative transition-colors">
+                            <div className="p-4">
+                              <div className="flex items-center justify-between gap-3 mb-3">
+                                <div className="px-2 py-1 rounded border border-indigo-200/80 dark:border-indigo-500/30 bg-indigo-50/80 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-['JetBrains_Mono',_monospace] text-[10px] uppercase font-bold tracking-wider">
+                                  Full Repo Review
+                                </div>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded ${message.reviewData.riskLevel === 'critical' ? 'bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400' : message.reviewData.riskLevel === 'high' ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/30 dark:text-orange-400' : message.reviewData.riskLevel === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'}`}>
+                                  Risk: {message.reviewData.riskLevel}
+                                </span>
+                              </div>
+
+                              <p className="text-[13px] text-zinc-600 dark:text-slate-300 leading-relaxed mb-4 transition-colors whitespace-pre-line">
+                                {message.reviewData.summary}
+                              </p>
+
+                              {message.reviewData.findings.length > 0 && (
+                                <div className="space-y-2 mb-4">
+                                  {message.reviewData.findings.slice(0, 3).map((finding, findingIndex) => (
+                                    <div key={`${finding.filePath}-${findingIndex}`} className="rounded-lg border border-zinc-200 dark:border-slate-700 bg-zinc-50/80 dark:bg-slate-900/60 p-2.5">
+                                      <div className="text-[11px] font-semibold text-zinc-800 dark:text-slate-100">
+                                        [{finding.severity.toUpperCase()}] {finding.filePath}{finding.line ? `:${finding.line}` : ''}
+                                      </div>
+                                      <div className="text-[12px] text-zinc-600 dark:text-slate-300 mt-1">
+                                        {finding.title}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {message.autoFix && (
+                                <button
+                                  onClick={() => handleAutoFix(index)}
+                                  disabled={message.autoFixApplied}
+                                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-zinc-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:bg-zinc-800 dark:hover:bg-white disabled:opacity-60 text-sm font-semibold transition-all shadow-[0_0_15px_rgba(24,24,27,0.2)] dark:shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+                                >
+                                  <Sparkles className="w-4 h-4" />
+                                  <span>{message.autoFixApplied ? 'Auto Fix Applied' : 'Auto Fix'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : message.isAnalysis && message.analysisData ? (
                           /* Actionable Analysis UI */
                           <div className="bg-white dark:bg-slate-800/90 rounded-xl border border-indigo-100/60 dark:border-indigo-500/20 shadow-[0_4px_20px_rgba(99,102,241,0.06)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative group transition-colors">
                             {/* Glow effect behind card */}

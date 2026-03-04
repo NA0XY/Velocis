@@ -159,11 +159,18 @@ export interface InstallJobResponse {
   overall_status?: 'queued' | 'in_progress' | 'complete' | 'failed';
 }
 
-export const installRepo = (repoId: number | string): Promise<InstallJobResponse> =>
-  request(`/repos/${repoId}/install`, { method: 'POST' });
+export const installRepo = (
+  repoId: number | string,
+  body?: { repoName?: string; language?: string; repoOwner?: string; repoFullName?: string }
+): Promise<InstallJobResponse> =>
+  request(`/api/repos/${repoId}/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
 export const getInstallStatus = (repoId: number | string): Promise<InstallJobResponse> =>
-  request(`/repos/${repoId}/install/status`);
+  request(`/api/repos/${repoId}/install/status`);
 
 // ─── 5. Dashboard ─────────────────────────────────────────────────────────────
 export interface ActivityEvent {
@@ -209,7 +216,7 @@ export interface DashboardResponse {
 }
 
 export const getDashboard = (range?: '1h' | '24h' | '7d' | '30d'): Promise<DashboardResponse> =>
-  request(`/dashboard${range ? `?range=${range}` : ''}`);
+  request(`/api/dashboard${range ? `?range=${range}` : ''}`);
 
 // ─── 6. Repository Overview ───────────────────────────────────────────────────
 export interface RepoDetail {
@@ -239,7 +246,7 @@ export interface RepoDetail {
 }
 
 export const getRepo = (repoId: string): Promise<RepoDetail> =>
-  request(`/repos/${repoId}`);
+  request(`/api/repos/${repoId}`);
 
 // ─── 7. Sentinel ──────────────────────────────────────────────────────────────
 export interface PrFinding {
@@ -266,13 +273,13 @@ export interface SentinelPr {
 export interface SentinelPrsResponse { prs: SentinelPr[] }
 
 export const getSentinelPrs = (repoId: string): Promise<SentinelPrsResponse> =>
-  request(`/repos/${repoId}/sentinel/prs`);
+  request(`/api/repos/${repoId}/sentinel/prs`);
 
 export const getSentinelPr = (repoId: string, prNumber: number): Promise<SentinelPr> =>
-  request(`/repos/${repoId}/sentinel/prs/${prNumber}`);
+  request(`/api/repos/${repoId}/sentinel/prs/${prNumber}`);
 
 export const triggerSentinelScan = (repoId: string): Promise<{ scan_id: string; status: string; message: string }> =>
-  request(`/repos/${repoId}/sentinel/scan`, { method: 'POST' });
+  request(`/api/repos/${repoId}/sentinel/scan`, { method: 'POST' });
 
 export interface SentinelEvent {
   id: string;
@@ -293,7 +300,7 @@ export const getSentinelActivity = (
   const qs = new URLSearchParams();
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.page) qs.set('page', String(params.page));
-  return request(`/repos/${repoId}/sentinel/activity${qs.toString() ? `?${qs}` : ''}`);
+  return request(`/api/repos/${repoId}/sentinel/activity${qs.toString() ? `?${qs}` : ''}`);
 };
 
 // ─── 8. Fortress (Pipeline) ───────────────────────────────────────────────────
@@ -304,6 +311,8 @@ export interface PipelineStep {
   state: StepState;
   duration_s: number | null;
   description: string;
+  /** Rich data written by executeFortressPipeline — file name, test counts, Claude explanation etc. */
+  stepData?: Record<string, unknown>;
 }
 
 export interface PipelineRun {
@@ -328,7 +337,7 @@ export interface PipelineRunSummary {
 }
 
 export const getPipeline = (repoId: string): Promise<PipelineRun> =>
-  request(`/repos/${repoId}/pipeline`);
+  request(`/api/repos/${repoId}/pipeline`);
 
 export const getPipelineRuns = (
   repoId: string,
@@ -338,14 +347,14 @@ export const getPipelineRuns = (
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.page) qs.set('page', String(params.page));
   if (params?.mode) qs.set('mode', params.mode);
-  return request(`/repos/${repoId}/pipeline/runs${qs.toString() ? `?${qs}` : ''}`);
+  return request(`/api/repos/${repoId}/pipeline/runs${qs.toString() ? `?${qs}` : ''}`);
 };
 
 export const triggerPipeline = (
   repoId: string,
   branch = 'main',
 ): Promise<{ run_id: string; status: string }> =>
-  request(`/repos/${repoId}/pipeline/trigger`, {
+  request(`/api/repos/${repoId}/pipeline/trigger`, {
     method: 'POST',
     body: JSON.stringify({ branch }),
   });
@@ -358,22 +367,8 @@ export interface CortexService {
   layer: ServiceLayer;
   position: { x: number; y: number; z: number };
   connections: number[];
-  metrics: { 
-    p95_latency: string; 
-    error_rate_pct: number; 
-    sparkline: number[];
-    lines_of_code: number;
-    file_count: number;
-    complexity: number;
-    dependencies_in: number;
-    dependencies_out: number;
-  };
+  metrics: { p95_latency: string; error_rate_pct: number; sparkline: number[] };
   tests: { total: number; passing: number; errors: number };
-  health: {
-    score: number;
-    issues: string[];
-  };
-  files: string[];
   last_deployment_ago: string;
 }
 
@@ -404,7 +399,6 @@ export const getCortexServiceDetail = (
 export const getCortexTimeline = (repoId: string): Promise<{ events: TimelineEvent[] }> =>
   request(`/api/repos/${repoId}/cortex/timeline`);
 
-// File-level drill-down
 export interface CortexFileNode {
   id: string;
   name: string;
@@ -414,15 +408,15 @@ export interface CortexFileNode {
   linesOfCode: number;
   complexity: number;
   functions: string[];
-  functionCalls?: Record<string, string[]>; // function name -> array of functions it calls
+  functionCalls?: Record<string, string[]>;
   importsFrom: string[];
   importedBy: string[];
   lastModified: string;
 }
 
 export interface CortexFileImport {
-  from: string;  // file id
-  to: string;    // file id
+  from: string;
+  to: string;
   count: number;
   functions: string[];
 }
@@ -470,6 +464,29 @@ export interface CodeAnnotation {
   suggestions: string[];
 }
 
+export interface WorkspaceReviewFinding {
+  severity: 'critical' | 'warning' | 'info';
+  file_path: string;
+  line?: number;
+  title: string;
+  description: string;
+  fix_suggestion: string;
+}
+
+export interface WorkspaceAutoFix {
+  file_path: string;
+  reason: string;
+  fixed_code: string;
+}
+
+export interface WorkspaceReviewResult {
+  summary: string;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  files_reviewed: number;
+  findings: WorkspaceReviewFinding[];
+  auto_fix: WorkspaceAutoFix | null;
+}
+
 export interface ChatMessage {
   message_id: string;
   role: MessageRole;
@@ -482,6 +499,8 @@ export interface ChatMessage {
     description: string;
     suggestions: string[];
   };
+  review?: WorkspaceReviewResult;
+  auto_fix?: WorkspaceAutoFix | null;
   timestamp: string;
   timestamp_ago: string;
 }
@@ -489,8 +508,9 @@ export interface ChatMessage {
 export const getWorkspaceFiles = (
   repoId: string,
   path = '/',
+  recursive = false,
 ): Promise<{ path: string; files: WorkspaceFile[] }> =>
-  request(`/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}`);
+  request(`/api/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`);
 
 export const getFileContent = (
   repoId: string,
@@ -498,7 +518,7 @@ export const getFileContent = (
   ref = 'main',
 ): Promise<{ path: string; ref: string; content: string; language: string }> =>
   request(
-    `/repos/${repoId}/workspace/files/content?path=${encodeURIComponent(filePath)}&ref=${ref}`,
+    `/api/repos/${repoId}/workspace/files/content?path=${encodeURIComponent(filePath)}&ref=${ref}`,
   );
 
 export const getAnnotations = (
@@ -507,23 +527,32 @@ export const getAnnotations = (
   ref = 'main',
 ): Promise<{ path: string; annotations: CodeAnnotation[] }> =>
   request(
-    `/repos/${repoId}/workspace/annotations?path=${encodeURIComponent(filePath)}&ref=${ref}`,
+    `/api/repos/${repoId}/workspace/annotations?path=${encodeURIComponent(filePath)}&ref=${ref}`,
   );
 
 export const postChatMessage = (
   repoId: string,
   payload: { message: string; context?: { file_path?: string; line?: number; annotation_id?: string }; language?: Language },
 ): Promise<ChatMessage> =>
-  request(`/repos/${repoId}/workspace/chat`, {
+  request(`/api/repos/${repoId}/workspace/chat`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+
+export const reviewWorkspaceCode = (
+  repoId: string,
+  payload?: { language?: Language; ref?: string },
+): Promise<ChatMessage> =>
+  request(`/api/repos/${repoId}/workspace/review`, {
+    method: 'POST',
+    body: JSON.stringify(payload ?? {}),
   });
 
 export const getChatHistory = (
   repoId: string,
   limit = 50,
 ): Promise<{ messages: ChatMessage[] }> =>
-  request(`/repos/${repoId}/workspace/chat/history?limit=${limit}`);
+  request(`/api/repos/${repoId}/workspace/chat/history?limit=${limit}`);
 
 // ─── 11. Infrastructure ───────────────────────────────────────────────────────
 export interface CostBreakdownItem {
@@ -549,22 +578,43 @@ export const getInfrastructure = (
   repoId: string,
   environment: Environment = 'production',
 ): Promise<InfrastructureData> =>
-  request(`/repos/${repoId}/infrastructure?environment=${environment}`);
+  request(`/api/repos/${repoId}/infrastructure?environment=${environment}`);
 
 export const getTerraformCode = (
   repoId: string,
   environment: Environment = 'production',
 ): Promise<{ environment: Environment; generated_at: string; source_commit: string; terraform_code: string }> =>
-  request(`/repos/${repoId}/infrastructure/terraform?environment=${environment}`);
+  request(`/api/repos/${repoId}/infrastructure/terraform?environment=${environment}`);
 
 export const generateIac = (
   repoId: string,
   environment: Environment = 'production',
   branch = 'main',
 ): Promise<{ job_id: string; status: string; message: string }> =>
-  request(`/repos/${repoId}/infrastructure/generate`, {
+  request(`/api/repos/${repoId}/infrastructure/generate`, {
     method: 'POST',
     body: JSON.stringify({ environment, branch }),
+  });
+
+// ─── 11b. Infrastructure Prediction (IaC Predictor) ───────────────────────────
+export interface InfraPredictionData {
+  impactSummary: string[];
+  iacCode: string;
+  costProjection: string;
+  confidenceScore: number;
+}
+
+export interface InfraPredictionResponse {
+  status: 'success';
+  data: InfraPredictionData;
+}
+
+export const predictInfrastructure = (
+  codeContent: string,
+): Promise<InfraPredictionResponse> =>
+  request('/api/infrastructure/predict', {
+    method: 'POST',
+    body: JSON.stringify({ codeContent }),
   });
 
 // ─── 12. Activity Feed ────────────────────────────────────────────────────────
@@ -579,7 +629,7 @@ export const getActivity = (params?: {
   if (params?.repo_id) qs.set('repo_id', params.repo_id);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.page) qs.set('page', String(params.page));
-  return request(`/activity${qs.toString() ? `?${qs}` : ''}`);
+  return request(`/api/activity${qs.toString() ? `?${qs}` : ''}`);
 };
 
 // ─── 13. System Health ────────────────────────────────────────────────────────
@@ -591,4 +641,4 @@ export interface SystemHealth {
   agents: { name: AgentName; status: 'running' | 'stopped' | 'degraded'; uptime_pct: number }[];
 }
 
-export const getSystemHealth = (): Promise<SystemHealth> => request('/system/health');
+export const getSystemHealth = (): Promise<SystemHealth> => request('/api/system/health');

@@ -123,8 +123,8 @@ export const handler = async (
                 expressionAttributeValues: { ":ownerGithubId": githubId },
             });
 
-            if (installedRepos && installedRepos.length > 0) {
-                installedRepos.forEach(repo => {
+            if (installedRepos && installedRepos.items.length > 0) {
+                installedRepos.items.forEach(repo => {
                     if (repo.repoName) {
                         installedReposMap.set(repo.repoName.toLowerCase(), true);
                     }

@@ -152,12 +152,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    // 5. Build file nodes with enhanced data and create ID mappings
-    const nodeIdToFileId = new Map<string, string>();
+    // 5. Build file nodes — importsFrom / importedBy / functions are stored directly on each
+    //    CortexNode since the graphBuilder back-fills them at build time.
+    const filePathToFileId = new Map<string, string>();
     const fileNodes: FileNode[] = serviceNodes.map((node: any, index: number) => {
       const fileId = (index + 1).toString();
-      nodeIdToFileId.set(node.id, fileId);
-      
+      filePathToFileId.set(node.filePath, fileId);
+
       return {
         id: fileId,
         name: node.label || node.filePath.split("/").pop() || "unknown",
@@ -166,65 +167,57 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         language: node.language || "unknown",
         linesOfCode: node.linesOfCode || 0,
         complexity: calculateComplexity(node),
-        functions: node.functions || extractFunctions(node),
-        functionCalls: node.functionCalls, // Include function call relationships
-        importsFrom: [],  // Will populate from edges
-        importedBy: [],   // Will populate from edges
+        functions: Array.isArray(node.functions) ? node.functions : [],
+        functionCalls: node.functionCalls || {},
+        importsFrom: Array.isArray(node.importsFrom) ? node.importsFrom : [],
+        importedBy: Array.isArray(node.importedBy) ? node.importedBy : [],
         lastModified: node.lastModified || new Date().toISOString(),
       };
     });
 
-    // 6. Build import relationships from edges
+    // 6. Build intra-service ReactFlow edges from importsFrom relationships
     const imports: FileImport[] = [];
     const intraServiceImportMap = new Map<string, FileImport>();
-    const serviceNodeIds = new Set(serviceNodes.map((n: any) => n.id));
-    
-    logger.info(`Processing ${allEdges.length} edges for service with ${serviceNodeIds.size} nodes`);
+    const serviceFilePaths = new Set(serviceNodes.map((n: any) => n.filePath as string));
 
-    allEdges.forEach((edge: any) => {
-      const sourceInService = serviceNodeIds.has(edge.source);
-      const targetInService = serviceNodeIds.has(edge.target);
+    logger.info(`Building ${serviceNodes.length} file nodes; deriving edges from stored importsFrom`);
 
-      // Skip edges that don't touch this service at all
-      if (!sourceInService && !targetInService) return;
+    for (const fileNode of fileNodes) {
+      const rawNode = serviceNodes.find((n: any) => n.filePath === fileNode.path);
+      if (!rawNode) continue;
 
-      const sourceFileId = nodeIdToFileId.get(edge.source);
-      const targetFileId = nodeIdToFileId.get(edge.target);
-      const sourceNode = nodeById.get(edge.source);
-      const targetNode = nodeById.get(edge.target);
+      for (const importedPath of (rawNode.importsFrom ?? [])) {
+        // Only draw ReactFlow edges for intra-service imports
+        if (!serviceFilePaths.has(importedPath)) continue;
+        const targetFileId = filePathToFileId.get(importedPath);
+        if (!targetFileId || targetFileId === fileNode.id) continue;
 
-      // Populate importsFrom: this service file imports another file (inside or outside service)
-      if (sourceInService && sourceFileId && targetNode) {
-        const sourceFile = fileNodes.find(f => f.id === sourceFileId);
-        if (sourceFile && !sourceFile.importsFrom.includes(targetNode.filePath)) {
-          sourceFile.importsFrom.push(targetNode.filePath);
-        }
-      }
-
-      // Populate importedBy: this service file is imported by another file (inside or outside service)
-      if (targetInService && targetFileId && sourceNode) {
-        const targetFile = fileNodes.find(f => f.id === targetFileId);
-        if (targetFile && !targetFile.importedBy.includes(sourceNode.filePath)) {
-          targetFile.importedBy.push(sourceNode.filePath);
-        }
-      }
-
-      // For ReactFlow edges: only intra-service connections (both nodes in this service)
-      if (sourceInService && targetInService && sourceFileId && targetFileId) {
-        const key = `${sourceFileId}→${targetFileId}`;
+        const key = `${fileNode.id}→${targetFileId}`;
         const existing = intraServiceImportMap.get(key);
         if (existing) {
           existing.count += 1;
         } else {
-          intraServiceImportMap.set(key, {
-            from: sourceFileId,
-            to: targetFileId,
-            count: 1,
-            functions: [],
-          });
+          intraServiceImportMap.set(key, { from: fileNode.id, to: targetFileId, count: 1, functions: [] });
         }
       }
-    });
+    }
+
+    // Fallback: also process raw edges for any older graphs without stored importsFrom
+    if (intraServiceImportMap.size === 0 && allEdges.length > 0) {
+      const nodeIdToFileId = new Map<string, string>();
+      serviceNodes.forEach((n: any, idx: number) => nodeIdToFileId.set(n.id, (idx + 1).toString()));
+      const serviceNodeIds = new Set(serviceNodes.map((n: any) => n.id as string));
+
+      allEdges.forEach((edge: any) => {
+        const srcId = nodeIdToFileId.get(edge.source);
+        const tgtId = nodeIdToFileId.get(edge.target);
+        if (!srcId || !tgtId || !serviceNodeIds.has(edge.source) || !serviceNodeIds.has(edge.target)) return;
+        const key = `${srcId}→${tgtId}`;
+        const existing = intraServiceImportMap.get(key);
+        if (existing) { existing.count += 1; }
+        else { intraServiceImportMap.set(key, { from: srcId, to: tgtId, count: 1, functions: [] }); }
+      });
+    }
 
     imports.push(...Array.from(intraServiceImportMap.values()));
 

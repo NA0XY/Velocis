@@ -49,7 +49,7 @@ import {
   type Filter,
 } from "@aws-sdk/client-pricing";
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient } from "../../services/database/dynamoClient";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
 import { fetchFileContent } from "../../services/github/repoOps";
 import { logger } from "../../utils/logger";
 import { config } from "../../utils/config";
@@ -151,7 +151,7 @@ export interface GenerateIacInput {
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
+const BEDROCK_MODEL_ID = "us.amazon.nova-pro-v1:0";
 const MAX_TOKENS = 8000;
 const MAX_SOURCE_CHARS_PER_FILE = 4000;
 const MAX_FILES_TO_ANALYZE = 10;
@@ -239,7 +239,7 @@ function detectAwsPatterns(
   }
 
   // Also detect resource names from common patterns
-  // e.g. TableName: config.DYNAMO_TABLE_REPOSITORIES → DynamoDB table detected
+  // e.g. TableName: config.DYNAMO_REPOSITORIES_TABLE → DynamoDB table detected
   const tableNameMatches = sourceCode.match(/TableName[:\s]+["'`]?([A-Za-z_\-]+)["'`]?/g);
   const bucketNameMatches = sourceCode.match(/Bucket[:\s]+["'`]?([A-Za-z_\-]+)["'`]?/g);
   const functionNameMatches = sourceCode.match(/FunctionName[:\s]+["'`]?([A-Za-z_\-]+)["'`]?/g);
@@ -610,11 +610,12 @@ async function invokeClaudeForIac(
   userPrompt: string
 ): Promise<{ responseText: string; latencyMs: number }> {
   const requestBody = {
-    anthropic_version: "bedrock-2023-05-31",
-    max_tokens: MAX_TOKENS,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
-    temperature: 0.1, // IaC must be precise — near-deterministic output
+    system: [{ text: systemPrompt }],
+    messages: [{ role: "user", content: [{ text: userPrompt }] }],
+    inferenceConfig: {
+      max_new_tokens: MAX_TOKENS,
+      temperature: 0.1,
+    },
   };
 
   const t0 = Date.now();
@@ -630,15 +631,15 @@ async function invokeClaudeForIac(
     const response = await bedrockClient.send(command);
     const latencyMs = Date.now() - t0;
     const parsed = JSON.parse(new TextDecoder().decode(response.body));
-    const responseText: string = parsed.content?.[0]?.text ?? "";
+    const responseText: string = parsed.output?.message?.content?.[0]?.text ?? "";
 
     logger.info(
       {
         latencyMs,
-        inputTokens: parsed.usage?.input_tokens,
-        outputTokens: parsed.usage?.output_tokens,
+        inputTokens: parsed.usage?.inputTokens,
+        outputTokens: parsed.usage?.outputTokens,
       },
-      "IaC Predictor: Bedrock Claude invocation complete"
+      "IaC Predictor: Bedrock Nova Pro invocation complete"
     );
 
     return { responseText, latencyMs };
@@ -780,10 +781,10 @@ function buildCloudFormationTemplate(
 
 async function getCachedResult(repoId: string): Promise<IacGenerationResult | null> {
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     const result = await docClient.send(
       new GetCommand({
-        TableName: config.DYNAMO_TABLE_REPOSITORIES,
+        TableName: config.DYNAMO_REPOSITORIES_TABLE,
         Key: { PK: `REPO#${repoId}`, SK: "IAC_RESULT" },
       })
     );
@@ -813,10 +814,10 @@ async function setCachedResult(
   iacResult: IacGenerationResult
 ): Promise<void> {
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     await docClient.send(
       new PutCommand({
-        TableName: config.DYNAMO_TABLE_REPOSITORIES,
+        TableName: config.DYNAMO_REPOSITORIES_TABLE,
         Item: {
           PK: `REPO#${repoId}`,
           SK: "IAC_RESULT",
@@ -962,10 +963,10 @@ export async function generateIac(
   //  because the previous cached result may have been for a different commitSha)
   let previousForecast: CostForecast | undefined;
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     const prev = await docClient.send(
       new GetCommand({
-        TableName: config.DYNAMO_TABLE_REPOSITORIES,
+        TableName: config.DYNAMO_REPOSITORIES_TABLE,
         Key: { PK: `REPO#${repoId}`, SK: "IAC_RESULT_PREV" },
       })
     );
@@ -1074,10 +1075,10 @@ export async function generateIac(
 
   // Also persist as "previous" for next run's delta calculation
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     await docClient.send(
       new PutCommand({
-        TableName: config.DYNAMO_TABLE_REPOSITORIES,
+        TableName: config.DYNAMO_REPOSITORIES_TABLE,
         Item: {
           PK: `REPO#${repoId}`,
           SK: "IAC_RESULT_PREV",

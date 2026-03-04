@@ -24,9 +24,6 @@ import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClien
 import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
 import { logger } from "../../utils/logger";
 import { config } from "../../utils/config";
-import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
-import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
-import { repoOps } from "../../services/github/repoOps";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -148,9 +145,9 @@ async function runInstallJob(
   repoId: string,
   userId: string,
   repoName?: string,
-  repoFullName?: string,
   language?: string,
-  githubToken?: string
+  repoOwner?: string,
+  repoFullName?: string,
 ): Promise<void> {
   const job = jobStore.get(jobId);
   if (!job) return;
@@ -161,31 +158,8 @@ async function runInstallJob(
       job.steps[step.id] = "in_progress";
       job.overallStatus = "in_progress";
 
-      // ── Cortex step: build the graph and sync service-level data ──────
-      if (step.id === "cortex" && githubToken) {
-        try {
-          const ownerQueryPart = repoFullName ? repoFullName.split("/")[0] : (repoId.split("/")[0] ?? userId);
-          const nameQueryPart = repoFullName ? repoFullName.split("/")[1] : (repoId.split("/")?.[1] ?? repoId);
-
-          const graph = await buildCortexGraph({
-            repoId,
-            repoOwner: ownerQueryPart,
-            repoName: nameQueryPart,
-            accessToken: githubToken,
-            forceRebuild: true,
-            enableAiSummaries: false, // Skip Bedrock calls during install for speed
-          });
-
-          await syncCortexServices(repoId, graph);
-          logger.info({ jobId, repoId, msg: "Cortex graph built and synced during install" });
-        } catch (cortexErr) {
-          logger.warn({ jobId, repoId, msg: "Cortex build/sync failed during install", err: cortexErr });
-          // Non-fatal — the step still passes so the dashboard is accessible
-        }
-      } else {
-        // Other steps: simulate async work
-        await new Promise((r) => setTimeout(r, 800));
-      }
+      // Simulate async work
+      await new Promise((r) => setTimeout(r, 800));
 
       // Mark step as complete
       job.steps[step.id] = "complete";
@@ -202,23 +176,16 @@ async function runInstallJob(
 
   // Persist the repo to the REPOSITORIES table using the shared dynamoClient
   const repoSlug = repoId.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  
-  // Extract owner from repoFullName (e.g., "octocat/repo" -> "octocat")
-  let repoOwner: string | undefined;
-  if (repoFullName && repoFullName.includes("/")) {
-    [repoOwner] = repoFullName.split("/");
-  }
-  
   try {
     await dynamoClient.upsert({
       tableName: DYNAMO_TABLES.REPOSITORIES,
       item: {
         repoId,
         repoSlug,
-        ownerGithubId: userId,
+        userId,
         repoName: repoName ?? repoId,
-        repoFullName: repoFullName,
-        repoOwner: repoOwner,
+        repoOwner: repoOwner ?? null,
+        repoFullName: repoFullName ?? (repoOwner && repoName ? `${repoOwner}/${repoName}` : null),
         language: language ?? null,
         status: "healthy",
         lastActivity: [],
@@ -251,10 +218,21 @@ export const installRepo = async (
   const repoId = event.pathParameters?.repoId;
   if (!repoId) return errors.badRequest("Missing repoId path parameter.");
 
-  // Check if already installed (in-memory)
+  // Check if already installed — first check in-memory, then DynamoDB
+  // (in-memory check fails after server restarts, so DynamoDB is authoritative)
   const existingJobs = findJobsForRepo(repoId, user.userId);
   if (existingJobs.some((j) => j.overallStatus === "complete")) {
     return errors.alreadyInstalled(repoId);
+  }
+  try {
+    const existingRepo = await dynamoClient.get<{ repoId: string }>({      tableName: DYNAMO_TABLES.REPOSITORIES,
+      key: { repoId },
+    });
+    if (existingRepo) {
+      return errors.alreadyInstalled(repoId);
+    }
+  } catch (_) {
+    // Non-fatal — if DynamoDB is unavailable, proceed with install
   }
 
   const jobId = `job_${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 16)}`;
@@ -277,21 +255,23 @@ export const installRepo = async (
 
   // Extract optional body parameters
   let repoName: string | undefined;
-  let repoFullName: string | undefined;
   let language: string | undefined;
+  let repoOwner: string | undefined;
+  let repoFullName: string | undefined;
   try {
     if (event.body) {
       const body = JSON.parse(event.body);
       repoName = body.repoName;
-      repoFullName = body.repoFullName;
       language = body.language;
+      repoOwner = body.repoOwner;
+      repoFullName = body.repoFullName;
     }
   } catch (e) {
     // Ignore invalid JSON body
   }
 
   // Fire async job
-  runInstallJob(jobId, repoId, user.userId, repoName, repoFullName, language, user.githubToken).catch((e) =>
+  runInstallJob(jobId, repoId, user.userId, repoName, language, repoOwner, repoFullName).catch((e) =>
     logger.error({ jobId, msg: "Install job crashed", e })
   );
 

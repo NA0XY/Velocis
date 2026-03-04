@@ -27,6 +27,7 @@
 import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { CortexGraph, CortexNode, CortexEdge } from "./graphBuilder";
 import { getDocClient } from "../../services/database/dynamoClient";
+import { invokeClaude } from "../../services/aws/bedrockClient";
 import { logger } from "../../utils/logger";
 import { randomUUID } from "crypto";
 
@@ -234,17 +235,125 @@ function guessType(dirName: string): ServiceGroup["type"] {
 /** Generic roots that shouldn't be used as service names by themselves — we look one level deeper. */
 const GENERIC_ROOTS = new Set(["src", "source", "app", "main", "core", "code", "pkg", "packages", "apps", "modules", "lib", "libs"]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AI-POWERED SERVICE GROUPING
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Groups CortexNodes into logical service boundaries.
+ * Uses DeepSeek V3.2 (via AWS Bedrock) to group file nodes into logical
+ * services. One prompt — the AI understands the actual intent of each file
+ * rather than relying on directory names and regex patterns.
+ *
+ * Falls back to the regex heuristic grouper if the AI call fails or
+ * returns unparseable output.
+ */
+async function groupNodesWithAI(nodes: CortexNode[]): Promise<ServiceGroup[]> {
+    const codeNodes = nodes.filter(n => !shouldSkipFile(n.filePath));
+    if (codeNodes.length === 0) return groupNodesIntoServices(nodes);
+
+    // Send paths only — summaries inflate input tokens and leave less room for
+    // the output JSON (which must repeat every file path). Cap at 300 files.
+    const trimmed = codeNodes.slice(0, 300);
+    const fileLines = trimmed.map(n => n.filePath).join("\n");
+
+    try {
+        const result = await invokeClaude({
+            systemPrompt:
+                "You are an expert software architect. You receive a list of source file paths (and optional one-line summaries) from a repository. " +
+                "Group them into logical services or modules — think about what makes sense architecturally, not just by directory name. " +
+                "Return ONLY a JSON object with a single key \"services\" whose value is an array. Each element must have:\n" +
+                "  \"name\": human-readable service name (2-4 words, Title Case)\n" +
+                "  \"layer\": one of \"edge\" (API/UI/entry-point), \"compute\" (business logic/workers), or \"data\" (database/storage/infra)\n" +
+                "  \"type\": one of \"api\", \"worker\", \"database\", \"cache\", or \"frontend\"\n" +
+                "  \"files\": array of file paths from the input (exact paths, no modifications)\n" +
+                "Rules: every file must appear in exactly one service. Aim for 2–12 meaningful groups. No service should contain only config/docs files unless that is the entire repo.",
+            messages: [
+                {
+                    role: "user",
+                    content: `Repository files:\n\n${fileLines}\n\nReturn the JSON object now.`,
+                },
+            ],
+            maxTokens: 4096,
+            temperature: 0.0,
+        });
+
+        // Log stop reason so we can detect future truncation
+        const stopReason = result.stopReason ?? "unknown";
+        if (stopReason === "length") {
+            logger.warn("AI service grouping hit token limit — output was truncated, falling back to regex");
+            return groupNodesIntoServices(nodes);
+        }
+
+        const raw = result.text.trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/, "");
+
+        const parsed = JSON.parse(raw) as {
+            services: { name: string; layer: string; type: string; files: string[] }[];
+        };
+
+        if (!Array.isArray(parsed.services) || parsed.services.length === 0) {
+            throw new Error("AI returned empty services array");
+        }
+
+        // Build a reverse map: filePath → node, for fast lookup
+        const nodeByPath = new Map(nodes.map(n => [n.filePath, n]));
+
+        // Track which paths the AI assigned so we can catch any it missed
+        const assignedPaths = new Set<string>();
+
+        const groups: ServiceGroup[] = [];
+        for (const svc of parsed.services) {
+            const svcNodes: CortexNode[] = [];
+            for (const fp of (svc.files ?? [])) {
+                const n = nodeByPath.get(fp);
+                if (n) {
+                    svcNodes.push(n);
+                    assignedPaths.add(fp);
+                }
+            }
+            if (svcNodes.length === 0) continue;
+
+            const layer = ["edge", "compute", "data"].includes(svc.layer)
+                ? svc.layer as ServiceGroup["layer"]
+                : "compute";
+            const type = ["api", "worker", "database", "cache", "frontend"].includes(svc.type)
+                ? svc.type as ServiceGroup["type"]
+                : "worker";
+
+            groups.push({ name: svc.name, layer, type, nodes: svcNodes });
+        }
+
+        // Any file the AI missed → fall back to regex classification for just those
+        const missed = nodes.filter(n => !assignedPaths.has(n.filePath) && !shouldSkipFile(n.filePath));
+        if (missed.length > 0) {
+            logger.warn({ count: missed.length }, "AI grouping missed some files — running regex fallback for them");
+            const fallbackGroups = groupNodesIntoServices(missed);
+            // Merge into existing groups by name, or add as new groups
+            for (const fg of fallbackGroups) {
+                const existing = groups.find(g => g.name === fg.name);
+                if (existing) existing.nodes.push(...fg.nodes);
+                else groups.push(fg);
+            }
+        }
+
+        logger.info({ groupCount: groups.length }, "AI service grouping complete");
+        return groups;
+
+    } catch (err) {
+        logger.warn({ err }, "AI service grouping failed — falling back to regex heuristics");
+        return groupNodesIntoServices(nodes);
+    }
+}
+
+/**
+ * Groups CortexNodes into logical service boundaries (regex/heuristic fallback).
  *
  * Routing order:
- *   1. File-extension routing — classifies data/IaC/asset files before any
- *      directory pattern can misclassify them (e.g. CSV ≠ infrastructure).
+ *   1. File-extension routing.
  *   2. Well-known directory patterns (handlers, services, functions, etc.).
  *   3. Top-level directory fallback.
  *   4. Root-level files → "Core Library".
- *
- * Works for ANY repository structure, not just Velocis.
  */
 function groupNodesIntoServices(nodes: CortexNode[]): ServiceGroup[] {
     const groups = new Map<string, ServiceGroup>();
@@ -856,8 +965,8 @@ export async function syncCortexServices(
     );
 
     try {
-        // ── Step 1: Group file nodes into logical services ──────────────────────
-        const serviceGroups = groupNodesIntoServices(graph.nodes);
+        // ── Step 1: Group file nodes into logical services using AI ────────────
+        const serviceGroups = await groupNodesWithAI(graph.nodes);
 
         let serviceRows: CortexServiceRow[];
 

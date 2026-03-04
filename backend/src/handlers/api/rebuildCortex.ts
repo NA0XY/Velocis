@@ -6,7 +6,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
 import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
-import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { getDocClient, dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
 import { getUserToken } from "../../services/github/auth";
 import { logger } from "../../utils/logger";
@@ -101,8 +101,28 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       owner = repo.repoOwner;
       name = repo.repoName;
     } else {
-      logger.error({ repo }, 'Repository missing owner/name - cannot rebuild. Please reinstall this repository.');
-      return errors.badRequest("Repository is missing owner/name information. Please reinstall this repository from the onboarding page.");
+      // Fallback: resolve owner/name from GitHub API using the numeric repo ID
+      logger.info({ repoId }, 'Resolving owner/name from GitHub API by repo ID');
+      try {
+        const ghRes = await fetch(`https://api.github.com/repositories/${repoId}`, {
+          headers: { Authorization: `Bearer ${githubToken}`, Accept: 'application/vnd.github+json' },
+        });
+        if (!ghRes.ok) throw new Error(`GitHub API returned ${ghRes.status}`);
+        const ghRepo = await ghRes.json() as { full_name: string; owner: { login: string }; name: string };
+        owner = ghRepo.owner.login;
+        name = ghRepo.name;
+        logger.info({ owner, name }, 'Resolved repo owner/name from GitHub API');
+        // Back-fill the DynamoDB record so future rebuilds work without this fallback
+        await docClient.send(new (await import('@aws-sdk/lib-dynamodb').then(m => m.UpdateCommand))({
+          TableName: REPOSITORIES_TABLE,
+          Key: { repoId },
+          UpdateExpression: 'SET repoOwner = :o, repoFullName = :f, repoName = :n',
+          ExpressionAttributeValues: { ':o': owner, ':f': ghRepo.full_name, ':n': name },
+        }));
+      } catch (ghErr) {
+        logger.error({ repo, ghErr }, 'Could not resolve repo owner from GitHub API');
+        return errors.badRequest("Repository is missing owner/name information. Please reinstall this repository from the onboarding page.");
+      }
     }
 
     // 3. Rebuild the graph
@@ -112,23 +132,12 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       repoOwner: owner,
       repoName: name,
       accessToken: githubToken,
-      enableAiSummaries: false, // Skip AI summaries for manual rebuild
+      enableAiSummaries: true, // DeepSeek V3.2 via Bedrock
       forceRebuild: true,
     });
 
-    // 3. Store the graph
-    await docClient.send(
-      new PutCommand({
-        TableName: REPOSITORIES_TABLE,
-        Item: {
-          repoId: `${repoId}#CORTEX_GRAPH`,
-          graph,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-    );
-
-    // 4. Sync services
+    // 3. Graph is already cached to DynamoDB by buildCortexGraph() itself (setCachedGraph).
+    //    Sync services into the CORTEX_TABLE for the service-level map view.
     await syncCortexServices(repoId, graph);
 
     logger.info(`Cortex rebuild complete for ${repoId}: ${graph.nodes.length} nodes, ${graph.edges.length} edges`);

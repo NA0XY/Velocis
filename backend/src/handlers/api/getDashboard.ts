@@ -126,7 +126,7 @@ export const handler = async (
     const scan = await docClient.send(
       new ScanCommand({
         TableName: DYNAMO_TABLES.REPOSITORIES,
-        FilterExpression: "ownerGithubId = :uid",
+        FilterExpression: "userId = :uid",
         ExpressionAttributeValues: { ":uid": userId },
       })
     );
@@ -137,7 +137,7 @@ export const handler = async (
       const scan2 = await docClient.send(
         new ScanCommand({
           TableName: REPOS_TABLE,
-          FilterExpression: "ownerGithubId = :uid",
+          FilterExpression: "userId = :uid",
           ExpressionAttributeValues: { ":uid": userId },
         })
       );
@@ -165,7 +165,7 @@ export const handler = async (
     const actScan = await docClient.send(
       new ScanCommand({
         TableName: ACTIVITY_TABLE,
-        FilterExpression: "ownerGithubId = :uid AND #ts >= :since",
+        FilterExpression: "userId = :uid AND #ts >= :since",
         ExpressionAttributeNames: { "#ts": "timestamp" },
         ExpressionAttributeValues: { ":uid": userId, ":since": since },
         Limit: 30,
@@ -192,7 +192,7 @@ export const handler = async (
     const depScan = await docClient.send(
       new ScanCommand({
         TableName: DEPLOYS_TABLE,
-        FilterExpression: "ownerGithubId = :uid",
+        FilterExpression: "userId = :uid",
         ExpressionAttributeValues: { ":uid": userId },
         Limit: 10,
       })
@@ -208,8 +208,17 @@ export const handler = async (
       }));
   } catch (_) { /* non-fatal */ }
 
+  // ── Deduplicate repos by repoId (guards against duplicate DynamoDB records)
+  const seen = new Set<string>();
+  const uniqueRepos = repos.filter((r) => {
+    const id = String(r.repoId ?? r.repoSlug ?? r.id ?? "");
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
   // ── Shape repo cards ─────────────────────────────────────────────────────────
-  const repoDashCards = repos.map((r) => ({
+  const repoDashCards = uniqueRepos.map((r) => ({
     id: r.repoSlug ?? r.repoId,
     name: r.repoName ?? r.repoSlug,
     status: r.status ?? "healthy",

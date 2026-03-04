@@ -18,9 +18,9 @@
 import * as path from "path";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { fetchRepoTree, fetchFileContent } from "../../services/github/repoOps";
-import { dynamoClient } from "../../services/database/dynamoClient";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
+import { invokeClaude } from "../../services/aws/bedrockClient";
 import { logger } from "../../utils/logger";
 import { config } from "../../utils/config";
 
@@ -42,6 +42,12 @@ export interface CortexNode {
   lastModified: string;     // ISO timestamp from GitHub
   importCount: number;      // How many other modules this node imports
   dependencyCount: number;  // How many nodes depend on this node
+  /** Resolved file paths this node imports (populated after edge building) */
+  importsFrom: string[];
+  /** Resolved file paths that import this node (populated after edge building) */
+  importedBy: string[];
+  /** Top-level exported function / class names extracted from source */
+  functions: string[];
   /** 3D positioning hints (frontend assigns final coordinates) */
   layer: number;            // 0 = infrastructure, 1 = services, 2 = functions, 3 = handlers
   position?: {
@@ -51,10 +57,6 @@ export interface CortexNode {
   };
   /** AI-generated summary of this file's responsibility */
   aiSummary?: string;
-  /** Functions defined in this file */
-  functions?: string[];
-  /** Map of function name to array of functions it calls */
-  functionCalls?: Record<string, string[]>;
 }
 
 export interface CortexEdge {
@@ -93,138 +95,48 @@ const IGNORED_PATTERNS = [
   "node_modules",
   ".git",
   "dist",
-  "build",
-  "out",
   ".next",
-  ".nuxt",
   "coverage",
   ".env",
   "yarn.lock",
   "package-lock.json",
-  "composer.lock",
-  "Gemfile.lock",
-  "Cargo.lock",
-  "go.sum",
-  "poetry.lock",
   "__pycache__",
   ".pyc",
   ".pyo",
   ".pyd",
-  ".class",
-  ".o",
-  ".so",
-  ".dll",
-  ".dylib",
-  ".exe",
-  ".bin",
+  ".egg-info",
+  "site-packages",
+  ".venv",
+  "venv",
+  ".pytest_cache",
 ];
-
-/** Binary / media file extensions that produce no architectural value as nodes */
-const BINARY_EXTENSIONS = new Set([
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".tiff",
-  ".svg",
-  ".woff", ".woff2", ".ttf", ".eot", ".otf",
-  ".mp3", ".mp4", ".wav", ".ogg", ".webm", ".mov", ".avi",
-  ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
-  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-]);
 
 /** Maps directory segments to layer numbers for 3D Z-axis grouping */
 const LAYER_MAP: Record<string, number> = {
-  // Layer 0 — data / infrastructure
-  infrastructure: 0, infra: 0,
-  database: 0, databases: 0, db: 0,
-  migrations: 0, migration: 0, seeds: 0, seeders: 0,
-  storage: 0, store: 0, cache: 0,
-  repositories: 0, repository: 0, repo: 0,
-  mocks: 0, fixtures: 0, stubs: 0,
-  // Layer 1 — core services / domain
-  services: 1, service: 1,
-  utils: 1, util: 1, helpers: 1, helper: 1,
-  models: 1, model: 1, entities: 1, entity: 1,
-  schemas: 1, schema: 1,
-  lib: 1, libs: 1, shared: 1, common: 1,
-  config: 1, configs: 1, settings: 1, configuration: 1, constants: 1,
-  prompts: 1, templates: 1,
-  // Layer 2 — compute / workers
-  functions: 2, function: 2,
-  lambdas: 2, lambda: 2,
-  workers: 2, worker: 2,
-  jobs: 2, job: 2,
-  tasks: 2, task: 2,
-  tests: 2, test: 2, specs: 2, spec: 2,
-  middlewares: 2, middleware: 2,
-  hooks: 2, hook: 2,
-  // Layer 3 — edge / API / UI
-  handlers: 3, handler: 3,
-  controllers: 3, controller: 3,
-  routes: 3, route: 3, router: 3, routers: 3,
-  endpoints: 3, endpoint: 3,
-  api: 3, apis: 3,
-  graphql: 3, rest: 3, grpc: 3,
-  components: 3, component: 3,
-  pages: 3, page: 3,
-  views: 3, view: 3,
-  screens: 3, screen: 3,
-  layouts: 3, layout: 3,
-  ui: 3,
+  infrastructure: 0,
+  services: 1,
+  utils: 1,
+  models: 1,
+  prompts: 1,
+  functions: 2,
+  handlers: 3,
+  mocks: 0,
+  tests: 2,
 };
 
 /** Maps file extensions to language labels */
 const LANGUAGE_MAP: Record<string, string> = {
-  // Web / Node
-  ".ts": "typescript",  ".tsx": "typescript",
-  ".js": "javascript",  ".jsx": "javascript",  ".mjs": "javascript",  ".cjs": "javascript",
-  // Python
-  ".py": "python",  ".pyi": "python",
-  // Go
-  ".go": "go",
-  // Ruby
-  ".rb": "ruby",  ".rake": "ruby",  ".gemspec": "ruby",
-  // Rust
-  ".rs": "rust",
-  // Java / JVM
-  ".java": "java",  ".kt": "kotlin",  ".kts": "kotlin",
-  ".scala": "scala",  ".groovy": "groovy",
-  // C-family
-  ".cs": "csharp",  ".cpp": "cpp",  ".cc": "cpp",  ".cxx": "cpp",
-  ".c": "c",  ".h": "c",  ".hpp": "cpp",
-  // PHP
-  ".php": "php",
-  // Swift / Dart
-  ".swift": "swift",  ".dart": "dart",
-  // Mobile
-  ".m": "objc",  ".mm": "objc",
-  // Styles
-  ".css": "css",  ".scss": "scss",  ".sass": "sass",  ".less": "less",
-  // Markup / Templates
-  ".html": "html",  ".htm": "html",
-  ".vue": "vue",  ".svelte": "svelte",  ".astro": "astro",
-  ".erb": "erb",  ".haml": "haml",  ".jinja": "jinja",  ".jinja2": "jinja",
-  // Data / Config
-  ".json": "json",  ".jsonc": "json",
-  ".yaml": "yaml",  ".yml": "yaml",
-  ".toml": "toml",  ".ini": "ini",  ".cfg": "ini",
-  ".csv": "csv",  ".tsv": "csv",
-  ".xml": "xml",  ".xsd": "xml",
-  ".env": "env",
-  // Database
-  ".sql": "sql",  ".prisma": "prisma",
-  // API / Infra
-  ".graphql": "graphql",  ".gql": "graphql",
-  ".proto": "protobuf",
-  ".tf": "terraform",  ".tfvars": "terraform",  ".hcl": "hcl",
-  ".bicep": "bicep",
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".py": "python",
+  ".json": "json",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".md": "markdown",
+  ".tf": "terraform",
   ".asl.json": "step-functions",
-  // Shell
-  ".sh": "shell",  ".bash": "shell",  ".zsh": "shell",  ".fish": "shell",
-  ".ps1": "powershell",  ".psm1": "powershell",
-  // Docs
-  ".md": "markdown",  ".mdx": "markdown",
-  ".rst": "rst",  ".txt": "plaintext",
-  // Docker / CI
-  ".dockerfile": "dockerfile",
-  ".Dockerfile": "dockerfile",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,61 +156,23 @@ function hashPath(filePath: string): string {
 }
 
 /**
- * Determines if a file should be ignored based on IGNORED_PATTERNS or binary extension.
+ * Determines if a file should be ignored based on IGNORED_PATTERNS.
  */
 function shouldIgnore(filePath: string): boolean {
-  if (IGNORED_PATTERNS.some((pattern) => filePath.includes(pattern))) return true;
-  // Skip binary / media assets — they carry no architectural signal
-  const rawExt = "." + (filePath.split(".").pop() ?? "").toLowerCase();
-  return BINARY_EXTENSIONS.has(rawExt);
+  return IGNORED_PATTERNS.some((pattern) => filePath.includes(pattern));
 }
 
 /**
  * Infers the NodeType from the file path.
- * Extended to handle all major framework conventions.
  */
 function inferNodeType(filePath: string): NodeType {
-  const lower = filePath.toLowerCase();
-  // Tests first
-  if (lower.includes("/tests/") || lower.includes("/__tests__/") || lower.includes("/specs/") ||
-      lower.includes(".test.") || lower.includes(".spec.")) return "test";
-  // IaC / infra
-  if (lower.includes("/infrastructure/") || lower.includes("/infra/") ||
-      lower.endsWith(".tf") || lower.endsWith(".tfvars") || lower.endsWith(".hcl") ||
-      lower.endsWith(".bicep") || lower.endsWith(".asl.json")) return "infrastructure";
-  // Data layer
-  if (lower.includes("/database/") || lower.includes("/databases/") || lower.includes("/db/") ||
-      lower.includes("/migrations/") || lower.includes("/migration/") ||
-      lower.includes("/repositories/") || lower.includes("/repository/") ||
-      lower.includes("/seeders/") || lower.includes("/seeds/") ||
-      lower.endsWith(".sql") || lower.endsWith(".prisma")) return "infrastructure";
-  // Edge / request handlers (service type)
-  if (lower.includes("/handlers/") || lower.includes("/controllers/") ||
-      lower.includes("/routes/") || lower.includes("/router/") ||
-      lower.includes("/endpoints/") || lower.includes("/api/") ||
-      lower.includes("/graphql/") || lower.includes("/grpc/") || lower.includes("/rest/")) return "service";
-  // Business services
-  if (lower.includes("/services/") || lower.includes("/service/")) return "service";
-  // Compute functions / workers
-  if (lower.includes("/functions/") || lower.includes("/lambdas/") ||
-      lower.includes("/workers/") || lower.includes("/jobs/") || lower.includes("/tasks/")) return "module";
-  // Utilities
-  if (lower.includes("/utils/") || lower.includes("/util/") || lower.includes("/helpers/") ||
-      lower.includes("/lib/") || lower.includes("/shared/") || lower.includes("/common/")) return "util";
-  // Domain models
-  if (lower.includes("/models/") || lower.includes("/entities/") ||
-      lower.includes("/schemas/")) return "config";
-  // Config / constants
-  if (lower.includes("/config/") || lower.includes("/configs/") ||
-      lower.includes("/settings/") || lower.includes("/constants/") ||
-      lower.includes("/prompts/")) return "config";
-  // UI layer
-  if (lower.includes("/components/") || lower.includes("/pages/") ||
-      lower.includes("/views/") || lower.includes("/ui/") ||
-      lower.includes("/screens/") || lower.includes("/layouts/")) return "module";
-  // Middleware / hooks
-  if (lower.includes("/middlewares/") || lower.includes("/middleware/") ||
-      lower.includes("/hooks/") || lower.includes("/hook/")) return "module";
+  if (filePath.includes("/tests/") || filePath.includes(".test.")) return "test";
+  if (filePath.includes("/infrastructure/")) return "infrastructure";
+  if (filePath.includes("/handlers/")) return "service";
+  if (filePath.includes("/services/")) return "service";
+  if (filePath.includes("/functions/")) return "module";
+  if (filePath.includes("/utils/")) return "util";
+  if (filePath.includes("/models/") || filePath.includes("/prompts/")) return "config";
   return "module";
 }
 
@@ -319,204 +193,137 @@ function inferLayer(filePath: string): number {
 function inferLanguage(filePath: string): string {
   // Handle double extensions like .asl.json
   if (filePath.endsWith(".asl.json")) return LANGUAGE_MAP[".asl.json"];
-  // Dockerfile has no extension
-  const basename = filePath.split("/").pop() ?? "";
-  if (basename === "Dockerfile" || basename.toLowerCase() === "dockerfile" || /^dockerfile\./i.test(basename)) return "dockerfile";
-  // Extension lookup — try lowercase first for cross-platform consistency
   const ext = path.extname(filePath);
-  return LANGUAGE_MAP[ext.toLowerCase()] ?? LANGUAGE_MAP[ext] ?? "plaintext";
+  return LANGUAGE_MAP[ext] ?? "plaintext";
 }
 
 /**
- * Parses static import statements from source code.
- * Returns a list of resolved paths that this file imports.
- * This is intentionally static (no AST) to stay Lambda-lightweight.
+ * Fallback regex: extracts relative import paths from JS/TS/Python source.
+ * Used when AI analysis is disabled or fails.
  */
-function extractImports(sourceCode: string, currentFilePath: string): string[] {
-  const fwdFilePath = currentFilePath.replace(/\\/g, "/");
-  const dir = fwdFilePath.includes("/") ? fwdFilePath.substring(0, fwdFilePath.lastIndexOf("/")) : "";
-  const ext = (fwdFilePath.split(".").pop() ?? "").toLowerCase();
+function extractImportsFallback(sourceCode: string, currentFilePath: string): string[] {
+  const imports: string[] = [];
+  const isPython = currentFilePath.endsWith(".py");
 
-  /**
-   * Stack-based path normalizer — correctly resolves ANY number of `..` levels.
-   * Single-pass regex can only resolve one level at a time, causing edges to
-   * point at wrong paths (e.g. `src/handlers/utils/x` instead of `src/utils/x`).
-   */
-  const norm = (raw: string): string => {
-    const parts = raw.replace(/\\/g, "/").split("/");
-    const stack: string[] = [];
-    for (const part of parts) {
-      if (part === "..") {
-        if (stack.length > 0) stack.pop();
-      } else if (part !== "" && part !== ".") {
-        stack.push(part);
+  if (isPython) {
+    const fromRe = /^\s*from\s+([\w.]+)\s+import/gm;
+    const dir = path.dirname(currentFilePath).replace(/\\/g, "/");
+    let m: RegExpExecArray | null;
+    while ((m = fromRe.exec(sourceCode)) !== null) {
+      const mod = m[1];
+      if (mod.startsWith(".")) {
+        const dots = mod.match(/^\.+/)?.[0].length ?? 1;
+        const rest = mod.replace(/^\.+/, "").replace(/\./g, "/");
+        let base = dir;
+        for (let i = 1; i < dots; i++) base = path.dirname(base).replace(/\\/g, "/");
+        imports.push(rest ? `${base}/${rest}` : base);
+      } else {
+        imports.push(mod.replace(/\./g, "/"));
       }
     }
-    return stack.join("/");
-  };
-
-  const seen = new Set<string>();
-  const results: string[] = [];
-  const push = (resolved: string) => {
-    const r = norm(resolved);
-    if (r && !seen.has(r)) { seen.add(r); results.push(r); }
-  };
-
-  // ── Python ────────────────────────────────────────────────────────────────
-  if (ext === "py" || ext === "pyi") {
-    let m: RegExpExecArray | null;
-    // Relative: from . import x, from .utils import y, from ..config import z
-    const relRe = /from\s+(\.+)([a-zA-Z0-9_.]*)[\s,]+import/g;
-    while ((m = relRe.exec(sourceCode)) !== null) {
-      const dots = m[1]; const mod = m[2];
-      let base = dir;
-      for (let i = 1; i < dots.length; i++) {
-        const sl = base.lastIndexOf("/");
-        base = sl > 0 ? base.substring(0, sl) : "";
-      }
-      if (mod) push((base ? base + "/" : "") + mod.replace(/\./g, "/") + ".py");
-    }
-    // Absolute: import foo, from foo.bar import baz
-    const absRe = /^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/gm;
-    while ((m = absRe.exec(sourceCode)) !== null) {
-      push((dir ? dir + "/" : "") + m[1].replace(/\./g, "/") + ".py");
-    }
-
-  // ── Go ────────────────────────────────────────────────────────────────────
-  } else if (ext === "go") {
-    const sections: string[] = [];
-    let block: RegExpExecArray | null;
-    const blockRe = /import\s*\(([^)]+)\)/gs;
-    while ((block = blockRe.exec(sourceCode)) !== null) sections.push(block[1]);
-    const singleRe = /^import\s+"([^"]+)"/gm;
-    let single: RegExpExecArray | null;
-    while ((single = singleRe.exec(sourceCode)) !== null) sections.push(`"${single[1]}"`);
-    const pathRe = /"([^"]+)"/g;
-    for (const section of sections) {
-      let m: RegExpExecArray | null;
-      while ((m = pathRe.exec(section)) !== null) {
-        const pkg = m[1];
-        const first = pkg.split("/")[0];
-        if (pkg.includes("/") && first.includes(".")) {
-          push(pkg.split("/").pop()! + "/" + pkg.split("/").pop()! + ".go");
-        } else if (!pkg.includes(".") && pkg.includes("/")) {
-          push((dir ? dir + "/" : "") + (pkg.split("/").pop() ?? pkg) + ".go");
-        }
-      }
-    }
-
-  // ── Ruby ─────────────────────────────────────────────────────────────────
-  } else if (ext === "rb" || ext === "rake") {
-    let m: RegExpExecArray | null;
-    const relRe = /require_relative\s+['"]([^'"]+)['"]/g;
-    while ((m = relRe.exec(sourceCode)) !== null) {
-      let p = norm((dir ? dir + "/" : "") + m[1]);
-      if (!p.endsWith(".rb")) p += ".rb";
-      push(p);
-    }
-    const reqRe = /require\s+['"](\.[^'"]+)['"]/g;
-    while ((m = reqRe.exec(sourceCode)) !== null) {
-      let p = norm((dir ? dir + "/" : "") + m[1]);
-      if (!p.endsWith(".rb")) p += ".rb";
-      push(p);
-    }
-
-  // ── Rust ─────────────────────────────────────────────────────────────────
-  } else if (ext === "rs") {
-    let m: RegExpExecArray | null;
-    const modRe = /^(?:pub\s+)?mod\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;/gm;
-    while ((m = modRe.exec(sourceCode)) !== null) {
-      push((dir ? dir + "/" : "") + m[1] + ".rs");
-    }
-    const useRe = /use\s+(?:crate|self|super)::([a-zA-Z0-9_:]+)/g;
-    while ((m = useRe.exec(sourceCode)) !== null) {
-      const parts = m[1].split("::");
-      const srcIdx = dir.indexOf("/src/");
-      const base = srcIdx !== -1 ? dir.substring(0, srcIdx + 4) : dir;
-      push((base ? base + "/" : "") + parts.join("/") + ".rs");
-    }
-
-  // ── PHP ───────────────────────────────────────────────────────────────────
-  } else if (ext === "php") {
-    let m: RegExpExecArray | null;
-    const reqRe = /(?:require|include)(?:_once)?\s*(?:\(\s*)?['"]([^'"]+)['"]/g;
-    while ((m = reqRe.exec(sourceCode)) !== null) {
-      if (m[1].startsWith(".")) push(norm((dir ? dir + "/" : "") + m[1]));
-    }
-    const dirConstRe = /(?:require|include)(?:_once)?\s*\(\s*__DIR__\s*\.\s*['"]([^'"]+)['"]/g;
-    while ((m = dirConstRe.exec(sourceCode)) !== null) {
-      push(norm(dir + m[1]));
-    }
-
-  // ── Java / Kotlin ─────────────────────────────────────────────────────────
-  } else if (ext === "java" || ext === "kt" || ext === "kts") {
-    let m: RegExpExecArray | null;
-    const fileExt = (ext === "kt" || ext === "kts") ? ".kt" : ".java";
-    const importRe = /^import\s+(?:static\s+)?([a-zA-Z][a-zA-Z0-9_.]+);?$/gm;
-    while ((m = importRe.exec(sourceCode)) !== null) {
-      const parts = m[1].split(".");
-      if (parts.length >= 3 && !parts[0].match(/^(java|javax|kotlin|android|com\.google|org\.springframework)$/)) {
-        push(parts.join("/") + fileExt);
-      }
-    }
-
-  // ── C# ────────────────────────────────────────────────────────────────────
-  } else if (ext === "cs") {
-    let m: RegExpExecArray | null;
-    const usingRe = /^using\s+(?:static\s+)?([a-zA-Z][a-zA-Z0-9_.]+)\s*;/gm;
-    while ((m = usingRe.exec(sourceCode)) !== null) {
-      const parts = m[1].split(".");
-      if (parts.length >= 2) push(parts.join("/") + ".cs");
-    }
-
-  // ── Swift ─────────────────────────────────────────────────────────────────
-  } else if (ext === "swift") {
-    let m: RegExpExecArray | null;
-    const importRe = /^import\s+([a-zA-Z_][a-zA-Z0-9_.]+)/gm;
-    while ((m = importRe.exec(sourceCode)) !== null) {
-      if (!m[1].match(/^(Foundation|UIKit|SwiftUI|AppKit|Combine|CoreData|XCTest)$/)) {
-        push((dir ? dir + "/" : "") + m[1] + ".swift");
-      }
-    }
-
-  // ── JavaScript / TypeScript (default) ────────────────────────────────────
   } else {
+    const re = /(?:import\s+.*?\s+from\s+['"](.+?)['"]|require\s*\(\s*['"](.+?)['"]\s*\))/g;
     let m: RegExpExecArray | null;
-
-    // Static imports: import X from './y', import { X } from '../y', import './y'
-    const staticRe = /import\s+(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g;
-    while ((m = staticRe.exec(sourceCode)) !== null) {
-      const importPath = m[1];
-      if (importPath.startsWith(".")) {
-        let resolved = norm((dir ? dir + "/" : "") + importPath);
-        if (!path.extname(resolved)) {
-          resolved += (ext === "js" || ext === "jsx" || ext === "mjs" || ext === "cjs") ? ".js" : ".ts";
-        }
-        push(resolved);
+    while ((m = re.exec(sourceCode)) !== null) {
+      const p = m[1] ?? m[2];
+      if (p?.startsWith(".")) {
+        const resolved = path.normalize(path.join(path.dirname(currentFilePath), p)).replace(/\\/g, "/");
+        imports.push(resolved);
       }
-    }
-
-    // require('./path')
-    const requireRe = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-    while ((m = requireRe.exec(sourceCode)) !== null) {
-      const importPath = m[1];
-      if (importPath.startsWith(".")) {
-        let resolved = norm((dir ? dir + "/" : "") + importPath);
-        if (!path.extname(resolved)) resolved += ".js";
-        push(resolved);
-      }
-    }
-
-    // Dynamic: import('./path')
-    const dynRe = /import\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
-    while ((m = dynRe.exec(sourceCode)) !== null) {
-      let resolved = norm((dir ? dir + "/" : "") + m[1]);
-      if (!path.extname(resolved)) resolved += ".ts";
-      push(resolved);
     }
   }
+  return imports;
+}
 
-  return results;
+/**
+ * Fallback regex: extracts top-level function/class names from JS/TS/Python source.
+ */
+function extractFunctionsFallback(source: string, filePath = ""): string[] {
+  const names = new Set<string>();
+  const isPython = filePath.endsWith(".py");
+  const patterns = isPython
+    ? [/^def\s+(\w+)\s*\(/gm, /^async\s+def\s+(\w+)\s*\(/gm, /^class\s+(\w+)[:(]/gm]
+    : [
+        /export\s+(?:async\s+)?function\s+(\w+)/g,
+        /export\s+const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/g,
+        /export\s+class\s+(\w+)/g,
+        /^(?:async\s+)?function\s+(\w+)/gm,
+        /^const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/gm,
+      ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source)) !== null) {
+      if (m[1] && m[1].length > 1 && m[1] !== "default") names.add(m[1]);
+    }
+  }
+  return Array.from(names).slice(0, 30);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI FILE ANALYSIS (DeepSeek V3.2 via AWS Bedrock)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface FileAnalysis {
+  functions: string[];   // exported / top-level function and class names
+  imports: string[];     // raw import paths exactly as written in the source
+  summary: string;       // one-sentence architectural description
+}
+
+/**
+ * Uses DeepSeek V3.2 to analyse a source file and return structured metadata.
+ * A single AI call replaces both extractImports + extractFunctionNames + generateAiSummary.
+ *
+ * The model is instructed to return ONLY a JSON object — no prose, no markdown.
+ * Falls back to regex extraction if the call fails or returns unparseable output.
+ */
+async function analyzeFileWithAI(
+  filePath: string,
+  sourceCode: string,
+): Promise<FileAnalysis> {
+  // Truncate to ~3 KB to keep token cost very low
+  const snippet = sourceCode.slice(0, 3000);
+  const ext = path.extname(filePath);
+
+  try {
+    const result = await invokeClaude({
+      systemPrompt:
+        "You are a code analysis engine. You read source files and return ONLY a JSON object — no markdown, no explanation, no prose. " +
+        "The JSON object must have exactly three keys:\n" +
+        '  "functions": array of strings — all top-level/exported function and class names defined in this file (max 30)\n' +
+        '  "imports": array of strings — the MODULE PATH portion only from every import statement (e.g. "./utils/auth", "../../lib/db", ".models", "flask", "express"). ' +
+        'For JS/TS: the string after "from" or in "require()". For Python: the string after "import" or "from" (before "import"). Do NOT include the word "from" or "import" or any symbol names.\n' +
+        '  "summary": string — one sentence (max 20 words) describing what this file does architecturally.\n' +
+        "Return nothing except the JSON object.",
+      messages: [
+        {
+          role: "user",
+          content: `File path: ${filePath}\nLanguage: ${ext}\n\nSource:\n\`\`\`\n${snippet}\n\`\`\`\n\nReturn the JSON object now.`,
+        },
+      ],
+      maxTokens: 400,
+      temperature: 0.0,
+    });
+
+    // Strip any accidental markdown fences
+    const raw = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    const parsed = JSON.parse(raw) as FileAnalysis;
+
+    // Normalise: ensure all fields are the right types
+    return {
+      functions: Array.isArray(parsed.functions) ? parsed.functions.slice(0, 30) : extractFunctionsFallback(sourceCode, filePath),
+      imports:   Array.isArray(parsed.imports)   ? parsed.imports               : extractImportsFallback(sourceCode, filePath),
+      summary:   typeof parsed.summary === "string" && parsed.summary.length > 3
+                   ? parsed.summary
+                   : "No summary available.",
+    };
+  } catch (err) {
+    logger.warn({ filePath, err }, "AI file analysis failed — falling back to regex");
+    return {
+      functions: extractFunctionsFallback(sourceCode, filePath),
+      imports:   extractImportsFallback(sourceCode, filePath),
+      summary:   "Summary unavailable.",
+    };
+  }
 }
 
 /**
@@ -531,153 +338,50 @@ function countLinesOfCode(source: string): number {
     }).length;
 }
 
-/**
- * Extracts function/method names from source code.
- * Supports: TypeScript, JavaScript, Python, Go, Ruby, Rust, Java, Kotlin, C#, PHP.
- */
-function extractFunctions(sourceCode: string, language: string): string[] {
-  const functions: string[] = [];
-  const push = (name: string) => { if (name && !functions.includes(name)) functions.push(name); };
-  try {
-    if (language === "typescript" || language === "javascript") {
-      [
-        /(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
-        /(?:export\s+)?const\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?\(/g,
-        /([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*:\s*[^{]+\s*{/g,
-      ].forEach(p => { let m; while ((m = p.exec(sourceCode)) !== null) push(m[1]); });
-    } else if (language === "python") {
-      let m; const p = /def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    } else if (language === "go") {
-      let m; const p = /func\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    } else if (language === "ruby") {
-      let m; const p = /def\s+(?:self\.)?([a-zA-Z_][a-zA-Z0-9_?!]*)/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    } else if (language === "rust") {
-      let m; const p = /(?:pub\s+)?(?:async\s+)?fn\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[<(]/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    } else if (language === "java" || language === "kotlin" || language === "scala") {
-      let m; const p = /(?:fun|void|public|private|protected|override|suspend)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
-      const SKIP = new Set(["if","for","while","switch","catch","class","interface","object","fun"]);
-      while ((m = p.exec(sourceCode)) !== null) if (!SKIP.has(m[1])) push(m[1]);
-    } else if (language === "csharp") {
-      let m; const p = /(?:public|private|protected|internal|static|override|virtual|async)\s+(?:[\w<>[\],.\s]+\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
-      const SKIP = new Set(["if","for","while","switch","catch","class","interface","return","new","void"]);
-      while ((m = p.exec(sourceCode)) !== null) if (!SKIP.has(m[1])) push(m[1]);
-    } else if (language === "php") {
-      let m; const p = /(?:public|private|protected|static)?\s*function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    } else if (language === "swift") {
-      let m; const p = /func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[(<]/g;
-      while ((m = p.exec(sourceCode)) !== null) push(m[1]);
-    }
-  } catch (err) { /* ignore */ }
-  return functions.slice(0, 20);
-}
-
-/**
- * Extracts function call relationships from source code.
- * Returns map of function name to array of functions it calls.
- */
-function extractFunctionCalls(sourceCode: string, language: string, availableFunctions: string[]): Map<string, string[]> {
-  const calls = new Map<string, string[]>();
-  
-  try {
-    if (language === "typescript" || language === "javascript") {
-      // For each function, find calls to other known functions
-      availableFunctions.forEach(funcName => {
-        const funcPattern = new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)\\s*{([^}]*(?:{[^}]*}[^}]*)*)`, 'g');
-        const constPattern = new RegExp(`const\\s+${funcName}\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*=>\\s*{([^}]*(?:{[^}]*}[^}]*)*)`, 'g');
-        
-        let match;
-        const body: string[] = [];
-        
-        while ((match = funcPattern.exec(sourceCode)) !== null) {
-          if (match[1]) body.push(match[1]);
-        }
-        while ((match = constPattern.exec(sourceCode)) !== null) {
-          if (match[1]) body.push(match[1]);
-        }
-        
-        if (body.length > 0) {
-          const calledFunctions: string[] = [];
-          const combinedBody = body.join('\n');
-          
-          availableFunctions.forEach(targetFunc => {
-            if (targetFunc !== funcName) {
-              const callPattern = new RegExp(`\\b${targetFunc}\\s*\\(`, 'g');
-              if (callPattern.test(combinedBody)) {
-                calledFunctions.push(targetFunc);
-              }
-            }
-          });
-          
-          if (calledFunctions.length > 0) {
-            calls.set(funcName, calledFunctions);
-          }
-        }
-      });
-    }
-  } catch (err) {
-    // Ignore extraction errors
-  }
-  
-  return calls;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// AI SUMMARY GENERATION (Claude 3.5 Sonnet via Bedrock)
+// AI SUMMARY GENERATION (DeepSeek V3.2 via AWS Bedrock)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const bedrockClient = new BedrockRuntimeClient({ region: config.AWS_REGION });
-
 /**
- * Calls Claude 3.5 Sonnet to generate a one-line architectural summary
- * for a given file. Used to populate the tooltip in the 3D canvas.
+/**
+ * Resolves raw import paths as returned by AI (exactly as written in source)
+ * to root-relative file paths, for both JS/TS relative imports and Python
+ * relative/absolute imports.
  *
- * Only called for key architectural files (services, handlers, functions)
- * to minimize Bedrock costs.
+ * Non-relative imports that don't resolve to a known file are kept as-is so
+ * the edge-dedup step can drop them when building the graph.
  */
-async function generateAiSummary(
-  filePath: string,
-  sourceCode: string
-): Promise<string> {
-  try {
-    const truncatedSource = sourceCode.slice(0, 2000); // Keep token cost low
-    const prompt = {
-      anthropic_version: "bedrock-2023-05-31",
-      max_tokens: 100,
-      messages: [
-        {
-          role: "user",
-          content: `You are analyzing a file in the Velocis codebase.
-File: ${filePath}
+function resolveRawImportPaths(rawPaths: string[], currentFilePath: string): string[] {
+  const isPython = currentFilePath.endsWith(".py");
+  const dir = path.dirname(currentFilePath).replace(/\\/g, "/");
+  const resolved: string[] = [];
 
-Source (truncated):
-\`\`\`
-${truncatedSource}
-\`\`\`
+  for (const raw of rawPaths) {
+    if (!raw || raw.length === 0) continue;
 
-Respond with ONLY a single sentence (max 20 words) describing what this file does architecturally. No preamble.`,
-        },
-      ],
-    };
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-      contentType: "application/json",
-      accept: "application/json",
-      body: JSON.stringify(prompt),
-    });
-
-    const response = await bedrockClient.send(command);
-    const parsed = JSON.parse(new TextDecoder().decode(response.body));
-    return parsed.content?.[0]?.text?.trim() ?? "No summary available.";
-  } catch (err) {
-    logger.warn({ filePath, err }, "AI summary generation failed — skipping");
-    return "Summary unavailable.";
+    if (isPython) {
+      // Python relative: ".models", "..services", "..utils.db"
+      if (raw.startsWith(".")) {
+        const dots = raw.match(/^\.+/)?.[0].length ?? 1;
+        const rest = raw.replace(/^\.+/, "").replace(/\./g, "/");
+        let base = dir;
+        for (let i = 1; i < dots; i++) base = path.dirname(base).replace(/\\/g, "/");
+        resolved.push(rest ? `${base}/${rest}` : base);
+      } else {
+        // Absolute Python import: "services.auth" → "services/auth"
+        resolved.push(raw.replace(/\./g, "/"));
+      }
+    } else {
+      // JS/TS: relative paths starting with "."
+      if (raw.startsWith(".")) {
+        const r = path.normalize(path.join(dir, raw)).replace(/\\/g, "/");
+        resolved.push(r);
+      }
+      // Non-relative (npm packages) are intentionally skipped
+    }
   }
+
+  return resolved;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -685,43 +389,20 @@ Respond with ONLY a single sentence (max 20 words) describing what this file doe
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fetches the latest test result status for a given file path from DynamoDB.
- * The Fortress TDD pipeline writes results keyed by filePath after each run.
+ * Fetches the latest Fortress TDD status for a file.
  *
- * Returns "untested" if no Fortress record exists for this file.
+ * NOTE: The live `velocis-ai-activity` DynamoDB table uses `RepoID`/`CommitHash` as
+ * its key schema, not `PK`/`SK`. Fortress writes a separate record per commit rather
+ * than per file path, so a file-level lookup is not yet supported.
+ * Until the Fortress pipeline is updated to write per-file results we return
+ * "untested" immediately to avoid a guaranteed-to-fail DynamoDB round-trip on
+ * every file during every graph build.
  */
-async function getFortressStatus(
-  repoId: string,
-  filePath: string
+function getFortressStatus(
+  _repoId: string,
+  _filePath: string
 ): Promise<NodeStatus> {
-  try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
-    const result = await docClient.send(
-      new GetCommand({
-        TableName: config.DYNAMO_TABLE_AI_ACTIVITY,
-        Key: {
-          PK: `REPO#${repoId}`,
-          SK: `FORTRESS#${filePath}`,
-        },
-      })
-    );
-
-    if (!result.Item) return "untested";
-
-    const { testStatus, failureCount } = result.Item as {
-      testStatus: string;
-      failureCount: number;
-    };
-
-    if (testStatus === "PASS") return "healthy";
-    if (testStatus === "FAIL" && failureCount >= 3) return "failing";
-    if (testStatus === "FAIL") return "warning";
-
-    return "untested";
-  } catch (err) {
-    logger.warn({ repoId, filePath, err }, "DynamoDB Fortress status fetch failed");
-    return "untested";
-  }
+  return Promise.resolve("untested");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -740,167 +421,100 @@ async function buildNodes(
   repoName: string,
   accessToken: string,
   enableAiSummaries = true
-): Promise<{ nodes: CortexNode[]; importMap: Map<string, string[]> }> {
+): Promise<{ nodes: CortexNode[]; importMap: Map<string, string[]>; rawImportPaths: Map<string, string[]> }> {
   logger.info({ repoId, repoName }, "Cortex: Fetching repo file tree");
 
-  const importMap = new Map<string, string[]>(); // nodeId → [importedNodeIds]
-  const nodes: CortexNode[] = [];
+  const tree = await fetchRepoTree({ repoFullName: `${repoOwner}/${repoName}`, token: accessToken, recursive: true });
+  const importMap = new Map<string, string[]>();     // nodeId → [importedNodeIds (hashed)]
+  const rawImportPaths = new Map<string, string[]>(); // nodeId → [resolved root-relative file paths]
 
-  // Fetch the repo file tree — handle empty repos gracefully
-  let tree: Awaited<ReturnType<typeof fetchRepoTree>>;
-  try {
-    tree = await fetchRepoTree({ repoFullName: `${repoOwner}/${repoName}`, token: accessToken, recursive: true });
-  } catch (err: any) {
-    // GitHub returns 409 "Git Repository is empty" or 404 "Not Found" for repos with no commits
-    if (
-      err?.cause?.status === 409 || err?.status === 409 ||
-      err?.cause?.status === 404 || err?.status === 404
-    ) {
-      logger.warn({ repoId }, "Cortex: Repository is empty or not found — returning empty graph");
-      return { nodes: [], importMap: new Map() };
-    }
-    throw err;
-  }
+  // Filter to processable files upfront
+  const files = tree.filter(f => f.type === "blob" && !shouldIgnore(f.path));
+  logger.info({ repoId, totalFiles: files.length }, "Cortex: Processing files in parallel");
 
-  // ── Import resolution map ────────────────────────────────────────────────
-  // GitHub gives us the exact file paths (e.g. src/utils/config.ts, src/components/Button.tsx,
-  // src/utils/index.ts).  extractImports returns *normalised* paths but can't know whether
-  // the import target is a .ts or .tsx file, or whether it resolves to a directory index.
-  // We pre-build a lookup table keyed by every *stripped* variant of each real file path so
-  // that we can map `src/utils/config` → `src/utils/config.ts` and
-  // `src/utils` → `src/utils/index.ts` before hashing.
-  const stripExt = (p: string): string => p.replace(/\.[^./\\]+$/, "");
+  // Process files in parallel batches to avoid GitHub/Bedrock rate-limit while
+  // dramatically cutting wall-clock time vs sequential await.
+  const CONCURRENCY = 6;
+  const results: CortexNode[] = [];
+  const importMapEntries: [string, string[]][] = [];
+  const rawImportEntries: [string, string[]][] = [];
 
-  /** real file paths that exist in the repo */
-  const filePathSet = new Set<string>(
-    tree.filter((f) => f.type === "blob").map((f) => f.path)
-  );
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const batch = files.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (file) => {
+        const nodeId = hashPath(file.path);
+        const language = inferLanguage(file.path);
+        const nodeType = inferNodeType(file.path);
+        const layer = inferLayer(file.path);
+        const isCodeFile = ["typescript", "javascript", "python"].includes(language);
 
-  /**
-   * Map: normalised-key  →  canonical file path in repo.
-   * Keys added (first match wins):
-   *   1. exact path with extension          → src/utils/config.ts
-   *   2. path without extension             → src/utils/config
-   *   3. parent directory of an index file  → src/utils  (from src/utils/index.ts)
-   */
-  const importResolutionMap = new Map<string, string>();
-  for (const fp of filePathSet) {
-    if (!importResolutionMap.has(fp))            importResolutionMap.set(fp, fp);
-    const noExt = stripExt(fp);
-    if (!importResolutionMap.has(noExt))         importResolutionMap.set(noExt, fp);
-    if (path.basename(noExt) === "index") {
-      const dir = path.dirname(fp).replace(/\\/g, "/");
-      if (!importResolutionMap.has(dir))         importResolutionMap.set(dir, fp);
-      const dirNoExt = stripExt(dir);
-      if (!importResolutionMap.has(dirNoExt))    importResolutionMap.set(dirNoExt, fp);
-    }
-  }
+        let linesOfCode = 0;
+        let resolvedImports: string[] = [];
+        let functionNames: string[] = [];
+        let aiSummary: string | undefined;
 
-  /**
-   * Resolve a normalised import path to the node-ID of the target, taking into
-   * account missing extensions and directory-index fallbacks.
-   */
-  const resolveImportToNodeId = (importPath: string): string => {
-    if (importResolutionMap.has(importPath))       return hashPath(importResolutionMap.get(importPath)!);
-    const noExt = stripExt(importPath);
-    if (importResolutionMap.has(noExt))            return hashPath(importResolutionMap.get(noExt)!);
-    return hashPath(importPath); // unknown external — will be discarded by buildEdges
-  };
-  // ────────────────────────────────────────────────────────────────────────────
+        if (isCodeFile) {
+          try {
+            const source = await fetchFileContent(repoOwner, repoName, file.path, accessToken);
+            linesOfCode = countLinesOfCode(source);
 
-  // Determine which files get AI summaries (only key architectural files)
-  const AI_SUMMARY_ELIGIBLE_PATHS = [
-    "/handlers/", "/controllers/",
-    "/functions/", "/lambdas/",
-    "/services/", "/service/",
-    "/workers/", "/jobs/",
-  ];
-
-  for (const file of tree) {
-    if (shouldIgnore(file.path)) continue;
-    if (file.type !== "blob") continue; // Skip directories
-
-    const nodeId = hashPath(file.path);
-    const language = inferLanguage(file.path);
-    const nodeType = inferNodeType(file.path);
-    const layer = inferLayer(file.path);
-
-    let linesOfCode = 0;
-    let imports: string[] = [];
-    let aiSummary: string | undefined;
-    let functions: string[] = [];
-    let functionCalls: Map<string, string[]> = new Map();
-
-    // Fetch source only for code files (skip binary/large files)
-    const isCodeFile = [
-      "typescript", "javascript", "python",
-      "go", "ruby", "rust",
-      "java", "kotlin", "scala", "groovy",
-      "csharp", "cpp", "c",
-      "php", "swift", "dart",
-    ].includes(language);
-
-    if (isCodeFile) {
-      try {
-        const source = await fetchFileContent(
-          repoOwner,
-          repoName,
-          file.path,
-          accessToken
-        );
-        linesOfCode = countLinesOfCode(source);
-        imports = extractImports(source, file.path);
-        
-        // Extract functions defined in this file
-        functions = extractFunctions(source, language);
-        
-        // Extract function call relationships
-        if (functions.length > 0) {
-          functionCalls = extractFunctionCalls(source, language, functions);
+            if (enableAiSummaries) {
+              const analysis = await analyzeFileWithAI(file.path, source);
+              functionNames   = analysis.functions;
+              aiSummary       = analysis.summary;
+              resolvedImports = resolveRawImportPaths(analysis.imports, file.path);
+            } else {
+              resolvedImports = extractImportsFallback(source, file.path);
+              functionNames   = extractFunctionsFallback(source, file.path);
+            }
+          } catch (err) {
+            logger.warn({ filePath: file.path, err }, "Could not fetch/analyse file");
+          }
         }
 
-        const isEligibleForAi = AI_SUMMARY_ELIGIBLE_PATHS.some((p) =>
-          file.path.includes(p)
-        );
+        // getFortressStatus is a no-op until the Fortress pipeline writes per-file records
+        const status = await getFortressStatus(repoId, file.path);
 
-        if (enableAiSummaries && isEligibleForAi) {
-          aiSummary = await generateAiSummary(file.path, source);
-        }
-      } catch (err) {
-        logger.warn({ filePath: file.path, err }, "Could not fetch file content");
-      }
-    }
+        const node: CortexNode = {
+          id: nodeId,
+          label: path.basename(file.path),
+          filePath: file.path,
+          type: nodeType,
+          status,
+          language,
+          linesOfCode,
+          lastModified: new Date().toISOString(),
+          importCount: resolvedImports.length,
+          dependencyCount: 0,
+          importsFrom: [],   // Back-filled after edge building
+          importedBy: [],    // Back-filled after edge building
+          functions: functionNames,
+          layer,
+          aiSummary,
+        };
 
-    // Fetch Fortress test health from DynamoDB
-    const status = await getFortressStatus(repoId, file.path);
-
-    const node: CortexNode = {
-      id: nodeId,
-      label: path.basename(file.path),
-      filePath: file.path,
-      type: nodeType,
-      status,
-      language,
-      linesOfCode,
-      lastModified: file.lastModified ?? new Date().toISOString(),
-      importCount: imports.length,
-      dependencyCount: 0, // Calculated in step 2
-      layer,
-      aiSummary,
-      functions: functions.length > 0 ? functions : undefined,
-      functionCalls: functionCalls.size > 0 ? Object.fromEntries(functionCalls) : undefined,
-    };
-
-    nodes.push(node);
-    importMap.set(
-      nodeId,
-      imports.map((importPath) => resolveImportToNodeId(importPath))
+        return {
+          node,
+          importEntry:   [nodeId, resolvedImports.map((p) => hashPath(p))] as [string, string[]],
+          rawImportEntry: [nodeId, resolvedImports] as [string, string[]],
+        };
+      })
     );
+
+    for (const r of batchResults) {
+      results.push(r.node);
+      importMapEntries.push(r.importEntry);
+      rawImportEntries.push(r.rawImportEntry);
+    }
   }
 
-  const totalImports = Array.from(importMap.values()).reduce((sum, arr) => sum + arr.length, 0);
-  logger.info({ repoId, nodeCount: nodes.length, totalImports, sampleImports: Array.from(importMap.entries()).slice(0, 2) }, "Cortex: Nodes built");
-  return { nodes, importMap };
+  for (const [k, v] of importMapEntries)  importMap.set(k, v);
+  for (const [k, v] of rawImportEntries)  rawImportPaths.set(k, v);
+
+  const nodes = results;
+  logger.info({ repoId, nodeCount: nodes.length }, "Cortex: Nodes built");
+  return { nodes, importMap, rawImportPaths };
 }
 
 /**
@@ -910,51 +524,54 @@ function buildEdges(
   nodes: CortexNode[],
   importMap: Map<string, string[]>
 ): CortexEdge[] {
-  const nodeIdSet  = new Set(nodes.map((n) => n.id));
-  // O(1) node lookup — replaces repeated nodes.find() inside the hot loop
-  const nodeById   = new Map<string, CortexNode>(nodes.map((n) => [n.id, n]));
-  // O(1) duplicate detection — replaces edges.some() inside the hot loop
-  const seenEdges  = new Set<string>();
+  const nodeIdSet = new Set(nodes.map((n) => n.id));
+
+  // Secondary lookup: imports often omit the file extension (e.g. "./bar" instead of "./bar.ts").
+  // Map hashPath(path-without-extension) → node id so we can still resolve them.
+  const noExtMap = new Map<string, string>();
+  for (const node of nodes) {
+    const noExt = node.filePath.replace(/\.[^/.]+$/, "");
+    noExtMap.set(hashPath(noExt), node.id);
+    // Handle barrel imports: "./utils/index" imported as "./utils"
+    if (noExt.endsWith("/index")) {
+      noExtMap.set(hashPath(noExt.replace(/\/index$/, "")), node.id);
+    }
+  }
+
+  const resolveTarget = (rawId: string): string | undefined => {
+    if (nodeIdSet.has(rawId)) return rawId;
+    return noExtMap.get(rawId);
+  };
+
   const dependencyCounter = new Map<string, number>();
   const edges: CortexEdge[] = [];
 
-  let totalAttempts = 0;
-  let skippedNotInGraph = 0;
-  let skippedSelfLoop = 0;
-  let skippedDuplicate = 0;
-  let created = 0;
-
   for (const [sourceId, targetIds] of importMap.entries()) {
-    for (const targetId of targetIds) {
-      totalAttempts++;
-
+    for (const rawTargetId of targetIds) {
+      const targetId = resolveTarget(rawTargetId);
       // Only create edges between nodes that exist in our graph
-      if (!nodeIdSet.has(targetId)) {
-        skippedNotInGraph++;
-        continue;
-      }
-      if (sourceId === targetId) {
-        skippedSelfLoop++;
-        continue;
-      }
+      if (!targetId) continue;
+      if (sourceId === targetId) continue; // No self-loops
 
       const edgeId = `${sourceId}→${targetId}`;
 
       // Avoid duplicate edges
-      if (seenEdges.has(edgeId)) {
-        skippedDuplicate++;
-        continue;
-      }
-      seenEdges.add(edgeId);
+      if (edges.some((e) => e.id === edgeId)) continue;
 
       // Determine edge type based on layer relationship
-      const sourceNode = nodeById.get(sourceId);
-      const targetNode = nodeById.get(targetId);
+      const sourceNode = nodes.find((n) => n.id === sourceId);
+      const targetNode = nodes.find((n) => n.id === targetId); // targetId is already resolved
 
       let edgeType: CortexEdge["type"] = "import";
-      if (sourceNode?.type === "service" && targetNode?.type === "module") {
+      if (
+        sourceNode?.type === "service" &&
+        targetNode?.type === "module"
+      ) {
         edgeType = "calls";
-      } else if (sourceNode?.type === "infrastructure" && targetNode?.type === "service") {
+      } else if (
+        sourceNode?.type === "infrastructure" &&
+        targetNode?.type === "service"
+      ) {
         edgeType = "orchestrates";
       }
 
@@ -963,8 +580,13 @@ function buildEdges(
       const strength = Math.min(10, existingDeps + 1);
       dependencyCounter.set(targetId, existingDeps + 1);
 
-      edges.push({ id: edgeId, source: sourceId, target: targetId, type: edgeType, strength });
-      created++;
+      edges.push({
+        id: edgeId,
+        source: sourceId,
+        target: targetId,
+        type: edgeType,
+        strength,
+      });
     }
   }
 
@@ -972,15 +594,6 @@ function buildEdges(
   for (const node of nodes) {
     node.dependencyCount = dependencyCounter.get(node.id) ?? 0;
   }
-
-  logger.info({
-    totalAttempts,
-    created,
-    skippedNotInGraph,
-    skippedSelfLoop,
-    skippedDuplicate,
-    edgeCount: edges.length,
-  }, "Cortex: Edges built");
 
   return edges;
 }
@@ -1062,11 +675,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — fast enough for "live" feel
 
 async function getCachedGraph(repoId: string): Promise<CortexGraph | null> {
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     const result = await docClient.send(
       new GetCommand({
         TableName: config.DYNAMO_REPOSITORIES_TABLE,
-        Key: { repoId: `${repoId}#CORTEX_GRAPH` }, // Use composite repoId to retrieve graph
+        Key: { repoId: `${repoId}#CORTEX_GRAPH` },
       })
     );
 
@@ -1092,15 +705,15 @@ async function getCachedGraph(repoId: string): Promise<CortexGraph | null> {
 
 async function setCachedGraph(repoId: string, graph: CortexGraph): Promise<void> {
   try {
-    const docClient = DynamoDBDocumentClient.from(dynamoClient);
+    const docClient = getDocClient();
     await docClient.send(
       new PutCommand({
-        TableName: config.DYNAMO_TABLE_REPOSITORIES,
+        TableName: config.DYNAMO_REPOSITORIES_TABLE,
         Item: {
-          repoId: `${repoId}#CORTEX_GRAPH`, // Use composite repoId to store graph separately
-          recordType: "CORTEX_GRAPH_CACHE",
+          repoId: `${repoId}#CORTEX_GRAPH`,
           graph,
           cachedAt: Date.now(),
+          updatedAt: new Date().toISOString(),
         },
       })
     );
@@ -1163,7 +776,7 @@ export async function buildCortexGraph(
   }
 
   // ── Step 1: Build nodes ──────────────────────────────────────────────────
-  const { nodes: rawNodes, importMap } = await buildNodes(
+  const { nodes: rawNodes, importMap, rawImportPaths } = await buildNodes(
     repoId,
     repoOwner,
     repoName,
@@ -1173,6 +786,41 @@ export async function buildCortexGraph(
 
   // ── Step 2: Build edges ──────────────────────────────────────────────────
   const edges = buildEdges(rawNodes, importMap);
+
+  // ── Step 2b: Back-fill importsFrom / importedBy on every node ────────────
+  // Build lookup tables so we can resolve raw import paths → actual file paths
+  const filePathSet = new Set(rawNodes.map((n) => n.filePath));
+  const nodeByFilePath = new Map(rawNodes.map((n) => [n.filePath, n]));
+
+  const resolveToFilePath = (rawPath: string): string | null => {
+    if (filePathSet.has(rawPath)) return rawPath;
+    for (const ext of [".ts", ".tsx", ".js", ".jsx", ".py"]) {
+      if (filePathSet.has(rawPath + ext)) return rawPath + ext;
+    }
+    // Try /index variants: "./utils" → "./utils/index.ts" etc.
+    for (const ext of [".ts", ".tsx", ".js", ".py"]) {
+      if (filePathSet.has(rawPath + "/index" + ext)) return rawPath + "/index" + ext;
+      if (filePathSet.has(rawPath + "/__init__" + ext)) return rawPath + "/__init__" + ext;
+    }
+    return null;
+  };
+
+  for (const node of rawNodes) {
+    const rawPaths = rawImportPaths.get(node.id) ?? [];
+    node.importsFrom = rawPaths
+      .map(resolveToFilePath)
+      .filter((p): p is string => p !== null);
+  }
+
+  // importedBy is the reverse of importsFrom
+  for (const node of rawNodes) {
+    for (const importedPath of node.importsFrom) {
+      const target = nodeByFilePath.get(importedPath);
+      if (target && !target.importedBy.includes(node.filePath)) {
+        target.importedBy.push(node.filePath);
+      }
+    }
+  }
 
   // ── Step 3: Assign 3D positions ──────────────────────────────────────────
   const positionedNodes = assign3DPositions(rawNodes);

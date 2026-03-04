@@ -1,8 +1,14 @@
-// server.ts
-// Local dev server for testing Velocis Lambda handlers WITHOUT deploying to AWS.
-// Wraps each Lambda handler in Express routes, simulating API Gateway behavior.
-// Run with: npm run dev
+/**
+ * server.ts
+ * Local Express dev server — wraps every Lambda handler so they can be called
+ * from http://localhost:3001 without AWS SAM or any cloud resources.
+ *
+ * The adapter converts an Express Request → APIGatewayProxyEvent and maps
+ * the APIGatewayProxyResult back to an Express Response, so every handler
+ * runs 100% unmodified.
+ */
 
+import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from "aws-lambda";
 import { randomUUID } from "crypto";
@@ -19,8 +25,6 @@ import * as getRepoOverview from "./src/handlers/api/getRepoOverview";
 import * as getSentinelData from "./src/handlers/api/getSentinelData";
 import * as getPipelineData from "./src/handlers/api/getPipelineData";
 import * as getCortexServices from "./src/handlers/api/getCortexServices";
-import * as getCortexServiceFiles from "./src/handlers/api/getCortexServiceFiles";
-import * as rebuildCortex from "./src/handlers/api/rebuildCortex";
 import * as getCortexData from "./src/handlers/api/getCortexData";
 import * as getWorkspaceData from "./src/handlers/api/getWorkspaceData";
 import * as getInfrastructure from "./src/handlers/api/getInfrastructureData";
@@ -30,163 +34,189 @@ import * as getSystemHealth from "./src/handlers/api/getSystemHealth";
 import * as postChatMessage from "./src/handlers/api/postChatMessage";
 import * as getRepos from "./src/handlers/api/getRepos";
 import * as githubPush from "./src/handlers/webhooks/githubPush";
+import * as predictInfrastructure from "./src/handlers/api/predictInfrastructure";
+import * as rebuildCortex from "./src/handlers/api/rebuildCortex";
+import * as getCortexServiceFiles from "./src/handlers/api/getCortexServiceFiles";
 
 // ── App setup ────────────────────────────────────────────────────────────────
 const app = express();
-const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const PORT = process.env.PORT ?? 3001;
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim());
 
-// ─────────────────────────────────────────────
-// MIDDLEWARE
-// ─────────────────────────────────────────────
-
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CORS — allow frontend dev server
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173")
-    .split(",")
-    .map((o) => o.trim());
-
+// CORS — allow all configured frontend origins
 app.use((req: Request, res: Response, next: NextFunction) => {
-    const origin = req.headers.origin ?? "";
-    if (ALLOWED_ORIGINS.includes(origin)) {
-        res.setHeader("Access-Control-Allow-Origin", origin);
-    } else {
-        res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
-    }
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-    res.setHeader(
-        "Access-Control-Allow-Headers",
-        "Content-Type,Authorization,Cookie,X-Requested-With"
-    );
-    if (req.method === "OPTIONS") {
-        res.sendStatus(200);
-        return;
-    }
-    next();
+  const origin = req.headers.origin ?? "";
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type,Authorization,x-repo-owner,x-repo-name,x-hub-signature-256,x-github-event,Cookie,X-Requested-With"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
 });
 
-// ─────────────────────────────────────────────
-// LAMBDA ADAPTER
-// Converts Express req → APIGatewayProxyEvent, runs the handler,
-// then converts APIGatewayProxyResult → Express res.
-// ─────────────────────────────────────────────
+// ── Lambda adapter ───────────────────────────────────────────────────────────
 
-function buildEvent(req: Request): APIGatewayProxyEvent {
-    const pathParameters: Record<string, string> = {};
-    // Extract any :param segments from the matched route
-    if (req.params) {
-        for (const [k, v] of Object.entries(req.params)) {
-            pathParameters[k] = v as string;
-        }
+// ... existing ...
+function toEvent(req: Request, pathParams: Record<string, string> = {}): APIGatewayProxyEvent {
+  const qs: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.query)) {
+    if (typeof v === "string") {
+      qs[k] = v;
+    } else if (Array.isArray(v)) {
+      qs[k] = String(v[0]);
     }
+  }
 
-    return {
-        httpMethod: req.method,
-        path: req.path,
-        pathParameters: Object.keys(pathParameters).length ? pathParameters : null,
-        queryStringParameters:
-            Object.keys(req.query).length
-                ? (req.query as Record<string, string>)
-                : null,
-        multiValueQueryStringParameters: null,
-        headers: req.headers as Record<string, string>,
-        multiValueHeaders: {},
-        body: req.body ? JSON.stringify(req.body) : null,
-        isBase64Encoded: false,
-        stageVariables: null,
-        resource: req.path,
-        requestContext: {
-            requestId: `local-${Date.now()}`,
-            accountId: "local",
-            apiId: "local",
-            httpMethod: req.method,
-            identity: {
-                sourceIp: req.ip ?? "127.0.0.1",
-                userAgent: req.headers["user-agent"] ?? "",
-                accessKey: null,
-                accountId: null,
-                apiKey: null,
-                apiKeyId: null,
-                caller: null,
-                clientCert: null,
-                cognitoAuthenticationProvider: null,
-                cognitoAuthenticationType: null,
-                cognitoIdentityId: null,
-                cognitoIdentityPoolId: null,
-                principalOrgId: null,
-                user: null,
-                userArn: null,
-            },
-            path: req.path,
-            protocol: "HTTP/1.1",
-            resourceId: "local",
-            resourcePath: req.path,
-            stage: "local",
-            requestTimeEpoch: Date.now(),
-            requestTime: new Date().toISOString(),
-            authorizer: null,
-            extendedRequestId: undefined,
-        },
-    };
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === "string") {
+      headers[k] = v;
+    } else if (Array.isArray(v)) {
+      headers[k] = String(v[0]);
+    }
+  }
+
+  const multiValueHeaders: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (Array.isArray(v)) {
+      multiValueHeaders[k] = v.map(String);
+    } else if (typeof v === "string") {
+      multiValueHeaders[k] = [v];
+    }
+  }
+
+  return {
+    httpMethod: req.method,
+    path: req.path,
+    pathParameters: Object.keys(pathParams).length ? pathParams : null,
+    queryStringParameters: Object.keys(qs).length ? qs : null,
+    multiValueQueryStringParameters: null,
+    headers,
+    multiValueHeaders: {},
+    body: req.body ? JSON.stringify(req.body) : null,
+    isBase64Encoded: false,
+    stageVariables: null,
+    resource: req.path,
+    requestContext: {
+      requestId: randomUUID(),
+      stage: "local",
+      resourcePath: req.path,
+      httpMethod: req.method,
+      path: req.path,
+      resourceId: "",
+      apiId: "local",
+      accountId: "000000000000",
+      protocol: "HTTP/1.1",
+      identity: {} as any,
+      requestTime: new Date().toUTCString(),
+      requestTimeEpoch: Date.now(),
+      authorizer: null as any,
+    },
+  };
 }
 
-function sendResult(res: Response, result: APIGatewayProxyResult): void {
-    // Handle multiple Set-Cookie headers via multiValueHeaders
-    const multiCookies: string[] =
-        (result as any).multiValueHeaders?.["Set-Cookie"] ?? [];
-    const singleCookie = result.headers?.["Set-Cookie"];
+/** Minimal Lambda Context for local use */
+const fakeContext: Context = {
+  callbackWaitsForEmptyEventLoop: false,
+  functionName: "local",
+  functionVersion: "$LATEST",
+  invokedFunctionArn: "arn:aws:lambda:local:000000000000:function:local",
+  memoryLimitInMB: "256",
+  awsRequestId: randomUUID(),
+  logGroupName: "/aws/lambda/local",
+  logStreamName: "local",
+  getRemainingTimeInMillis: () => 30000,
+  done: () => { },
+  fail: () => { },
+  succeed: () => { },
+};
 
-    const allCookies = [
-        ...multiCookies,
-        ...(singleCookie ? [singleCookie] : []),
-    ] as string[];
+type LambdaHandler = (event: APIGatewayProxyEvent, ctx: Context) => Promise<APIGatewayProxyResult>;
 
-    // Forward all response headers
-    if (result.headers) {
-        for (const [key, value] of Object.entries(result.headers)) {
-            if (key === "Set-Cookie") continue; // Handled below
-            res.setHeader(key, String(value));
+/** Wrap a Lambda handler into an Express route handler */
+function wrap(handler: LambdaHandler, paramMap?: Record<string, string>) {
+  return async (req: Request, res: Response) => {
+    // Build path param mapping from Express :params → API GW format
+    const params: Record<string, string> = {};
+    if (paramMap) {
+      for (const [expressKey, agwKey] of Object.entries(paramMap)) {
+        if (req.params[expressKey]) {
+          params[agwKey] = String(req.params[expressKey]);
         }
+      }
+    } else {
+      // Auto-map: Express param name == AGW param name
+      for (const [k, v] of Object.entries(req.params)) {
+        params[k] = String(v);
+      }
     }
 
-    // Set cookies individually
-    for (const cookie of allCookies) {
-        res.append("Set-Cookie", cookie);
-    }
+    try {
+      const event = toEvent(req, params);
+      const result = await handler(event, fakeContext);
 
-    res.status(result.statusCode);
+      // Forward all Lambda headers
+      if (result.headers) {
+        for (const [k, v] of Object.entries(result.headers)) {
+          // Skip CORS headers — already set by our middleware
+          if (k.toLowerCase().startsWith("access-control-")) continue;
 
-    if (!result.body) {
-        res.end();
-        return;
-    }
+          if (Array.isArray(v)) {
+            res.setHeader(k, (v as unknown as any[]).map(String));
+          } else {
+            res.setHeader(k, String(v));
+          }
+        }
+      }
 
-    const contentType = result.headers?.["Content-Type"] ?? "application/json";
-    res.setHeader("Content-Type", String(contentType));
-    res.send(result.body);
-}
+      // Forward multi-value headers (used for multiple Set-Cookie headers)
+      // Each cookie must be appended individually — res.setHeader would overwrite
+      if (result.multiValueHeaders) {
+        for (const [k, values] of Object.entries(result.multiValueHeaders)) {
+          if (k.toLowerCase().startsWith("access-control-")) continue;
+          if (Array.isArray(values)) {
+            for (const v of values) {
+              res.append(k, String(v));
+            }
+          }
+        }
+      }
 
-type LambdaHandler = (event: APIGatewayProxyEvent) => Promise<APIGatewayProxyResult>;
+      res.status(result.statusCode);
 
-function wrap(handler: LambdaHandler) {
-    return async (req: Request, res: Response) => {
+      // If body looks like JSON, parse it so clients get a proper JSON response
+      const body = result.body ?? "";
+      const ct = (result.headers?.["Content-Type"] ?? result.headers?.["content-type"] ?? "").toString();
+      if (ct.includes("application/json") || (body.startsWith("{") || body.startsWith("["))) {
         try {
-            const event = buildEvent(req);
-            const result = await handler(event);
-            sendResult(res, result);
-        } catch (err) {
-            console.error("Handler error:", err);
-            res.status(500).json({ error: "Internal server error" });
+          res.json(JSON.parse(body));
+        } catch {
+          res.send(body);
         }
-    };
+      } else {
+        res.send(body);
+      }
+    } catch (err: any) {
+      console.error("[server] Handler threw:", err?.message ?? err);
+      res.status(500).json({ message: "Internal server error", error: err?.message });
+    }
+  };
 }
 
-// ─────────────────────────────────────────────
-// ROUTES
-// Import handlers lazily so dotenv loads first
-// ─────────────────────────────────────────────
+// ── Routes ───────────────────────────────────────────────────────────────────
 
 // § 1 — Authentication (session-cookie based OAuth)
 app.get("/api/auth/github", wrap(authGithub.handler as LambdaHandler));
@@ -224,12 +254,47 @@ app.get("/api/repos/:repoId/pipeline/runs", wrap(getPipelineData.getPipelineRuns
 app.post("/api/repos/:repoId/pipeline/trigger", wrap(getPipelineData.triggerPipeline as LambdaHandler));
 app.get("/api/repos/:repoId/pipeline/runs/:runId", wrap(getPipelineData.getPipelineRunDetail as LambdaHandler));
 
+// § 8a — Fortress QA Strategist
+app.post("/api/fortress/qa-plan", wrap(getPipelineData.postQAPlan as LambdaHandler));
+
+// § 8b — Fortress API Documenter
+app.post("/api/fortress/api-docs", wrap(getPipelineData.postApiDocs as LambdaHandler));
+
+// § 9-debug — Cortex graph inspection (dev only)
+app.get("/debug/cortex/:repoId/graph", async (req: Request, res: Response) => {
+  try {
+    const { getDocClient } = await import("./src/services/database/dynamoClient");
+    const { GetCommand } = await import("@aws-sdk/lib-dynamodb");
+    const { config } = await import("./src/utils/config");
+    const dc = getDocClient();
+    const result = await dc.send(new GetCommand({
+      TableName: config.DYNAMO_REPOSITORIES_TABLE,
+      Key: { repoId: `${req.params.repoId}#CORTEX_GRAPH` },
+    }));
+    if (!result.Item) { res.json({ found: false }); return; }
+    const nodes = result.Item.graph?.nodes ?? [];
+    res.json({
+      found: true,
+      nodeCount: nodes.length,
+      edgeCount: result.Item.graph?.edges?.length ?? 0,
+      cachedAt: result.Item.cachedAt,
+      sampleNodes: nodes.slice(0, 5).map((n: any) => ({
+        filePath: n.filePath,
+        functions: n.functions,
+        importsFrom: n.importsFrom,
+        importedBy: n.importedBy,
+        linesOfCode: n.linesOfCode,
+      })),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // § 9 — Cortex agent (service map)
 app.get("/api/repos/:repoId/cortex/services", wrap(getCortexServices.listServices as LambdaHandler));
 app.get("/api/repos/:repoId/cortex/services/:serviceId", wrap(getCortexServices.getServiceDetail as LambdaHandler));
+app.get("/api/repos/:repoId/cortex/timeline", wrap(getCortexServices.getCortexTimeline as LambdaHandler));
 app.get("/api/repos/:repoId/cortex/services/:serviceId/files", wrap(getCortexServiceFiles.handler as LambdaHandler));
 app.post("/api/repos/:repoId/cortex/rebuild", wrap(rebuildCortex.handler as LambdaHandler));
-app.get("/api/repos/:repoId/cortex/timeline", wrap(getCortexServices.getCortexTimeline as LambdaHandler));
 app.get("/api/repos/:repoId/cortex", wrap(getCortexData.handler as LambdaHandler));
 
 // § 10 — Workspace
@@ -237,6 +302,7 @@ app.get("/api/repos/:repoId/workspace/files", wrap(getWorkspaceData.listFiles as
 app.get("/api/repos/:repoId/workspace/files/content", wrap(getWorkspaceData.getFileContent as LambdaHandler));
 app.get("/api/repos/:repoId/workspace/annotations", wrap(getWorkspaceData.getAnnotations as LambdaHandler));
 app.post("/api/repos/:repoId/workspace/chat", wrap(getWorkspaceData.sendChatMessage as LambdaHandler));
+app.post("/api/repos/:repoId/workspace/review", wrap(getWorkspaceData.reviewCodebase as LambdaHandler));
 app.get("/api/repos/:repoId/workspace/chat/history", wrap(getWorkspaceData.getChatHistory as LambdaHandler));
 
 // § 11 — Infrastructure / IaC
@@ -244,6 +310,7 @@ app.get("/api/repos/:repoId/infrastructure", wrap(getInfrastructure.getInfrastru
 app.get("/api/repos/:repoId/infrastructure/terraform", wrap(getInfrastructure.getTerraform as LambdaHandler));
 app.post("/api/repos/:repoId/infrastructure/generate", wrap(getInfrastructure.generateInfrastructure as LambdaHandler));
 app.get("/api/repos/:repoId/infrastructure/forecast", wrap(getCostForecast.handler as LambdaHandler));
+app.post("/api/infrastructure/predict", wrap(predictInfrastructure.handler as LambdaHandler));
 
 // § 12 — Activity feed
 app.get("/api/activity", wrap(getActivity.handler as LambdaHandler));
@@ -260,15 +327,19 @@ app.post("/api/webhooks/github", wrap(githubPush.handler as LambdaHandler));
 // Health check
 app.get("/health", (_req, res) => res.json({ status: "ok", ts: new Date().toISOString() }));
 
-// Start listening immediately so the server is available
-app.listen(PORT, async () => {
-    console.log(`\n🚀 Velocis backend running at http://localhost:${PORT}`);
-
-    // Register handlers after the server is already up
-    await registerRoutes();
-
-    console.log(`\n   GitHub OAuth:   http://localhost:${PORT}/api/auth/github`);
-    console.log(`   Callback:       http://localhost:${PORT}/api/auth/github/callback`);
-    console.log(`   Webhook:        http://localhost:${PORT}/webhooks/github/push`);
-    console.log(`   Health:         http://localhost:${PORT}/health\n`);
+// ── Start ────────────────────────────────────────────────────────────────────
+const server = app.listen(PORT, () => {
+  console.log(`\n🚀  Velocis backend running at http://localhost:${PORT}`);
+  console.log(`    CORS allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
+  console.log(`    NODE_ENV: ${process.env.NODE_ENV ?? "development"}\n`);
 });
+
+server.on("error", (err: any) => {
+  console.error(`\n❌  Failed to start backend on port ${PORT}:`, err.message);
+  if (err.code === "EADDRINUSE") {
+    console.error(`    Port ${PORT} is already in use. Please kill the process using it.`);
+  }
+  process.exit(1);
+});
+
+export default app;

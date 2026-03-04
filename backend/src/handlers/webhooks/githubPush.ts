@@ -1,19 +1,28 @@
 // src/handlers/webhooks/githubPush.ts
-// The Master Orchestrator — fires on every GitHub push event
-// Validates the incoming webhook, then triggers all three Velocis agents
+// The Master Orchestrator — routes ALL GitHub webhook events to the correct agent
+//
+// Supported events (per API_CONTRACT §16):
+//   push              → Full tri-agent pipeline (Sentinel + Cortex + Fortress)
+//   pull_request      → Sentinel PR analysis (opened / synchronize / reopened)
+//                       or state update (closed / merged)
+//   pull_request_review → Log to activity feed
+//   deployment        → Record deployment event for Cortex timeline
+//   ping              → ACK with 200
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
+import { randomUUID } from "crypto";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { verifySignature } from "../../middlewares/verifySignature";
 import { validatePayload } from "../../middlewares/validatePayload";
 import { githubPushSchema } from "../../models/schemas/githubSchemas";
 import { analyzeLogic } from "../../functions/sentinel/analyzeLogic";
-import { writeTests } from "../../functions/fortress/writeTests";
-<<<<<<< Updated upstream
-import { graphBuilder } from "../../functions/cortex/graphBuilder";
-=======
+import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress";
 import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
-import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
->>>>>>> Stashed changes
 import { dynamoClient } from "../../services/database/dynamoClient";
 import { repoOps } from "../../services/github/repoOps";
 import { logger } from "../../utils/logger";
@@ -26,58 +35,44 @@ import { Repository } from "../../models/interfaces/Repository";
 // ─────────────────────────────────────────────
 const AGENT_TIMEOUT_MS = 25000; // Lambda safe timeout buffer
 
-<<<<<<< Updated upstream
-=======
-const _rawDynamo = new DynamoDBClient({});
-const _docClient = DynamoDBDocumentClient.from(_rawDynamo);
-const SENTINEL_TABLE = process.env.SENTINEL_TABLE ?? "velocis-sentinel";
-const ACTIVITY_TABLE = process.env.ACTIVITY_TABLE ?? "velocis-activity";
-const TIMELINE_TABLE = process.env.TIMELINE_TABLE ?? "velocis-timeline";
-const PIPELINE_TABLE = process.env.PIPELINE_TABLE ?? "velocis-pipeline-runs";
+const _rawDynamo   = new DynamoDBClient({});
+const _docClient   = DynamoDBDocumentClient.from(_rawDynamo);
+const SENTINEL_TABLE   = process.env.SENTINEL_TABLE   ?? "velocis-sentinel";
+const ACTIVITY_TABLE   = process.env.ACTIVITY_TABLE   ?? "velocis-activity";
+const TIMELINE_TABLE   = process.env.TIMELINE_TABLE   ?? "velocis-timeline";
+const PIPELINE_TABLE   = process.env.PIPELINE_TABLE   ?? "velocis-pipeline-runs";
 
->>>>>>> Stashed changes
 // ─────────────────────────────────────────────
-// MAIN HANDLER
+// TOP-LEVEL ROUTER
+// Reads X-GitHub-Event header and dispatches to the right sub-handler.
+// HMAC verification is always done first.
 // ─────────────────────────────────────────────
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
-  const requestId = event.requestContext?.requestId ?? "unknown";
-<<<<<<< Updated upstream
-  logger.info({ requestId, msg: "GitHub push webhook received" });
-
-  // ── STEP 1: Verify the webhook actually came from GitHub ──────────────────
-  const rawBody = event.body ?? "";
-  const signature = event.headers["x-hub-signature-256"] ?? "";
-=======
-  const rawBody = event.body ?? "";
-  const signature = event.headers["x-hub-signature-256"] ?? "";
+  const requestId  = event.requestContext?.requestId ?? "unknown";
+  const rawBody    = event.body ?? "";
+  const signature  = event.headers["x-hub-signature-256"] ?? "";
   const githubEvent = event.headers["x-github-event"] ?? "push";
->>>>>>> Stashed changes
 
+  // ── Verify HMAC signature ────────────────────────────────────────────────
   const isValid = verifySignature({
     rawBody,
     signature,
     secret: config.GITHUB_WEBHOOK_SECRET,
   });
-
   if (!isValid) {
     logger.warn({ requestId, msg: "Invalid webhook signature — rejected" });
     return response(401, { error: "Unauthorized: Invalid webhook signature" });
   }
 
-  // ── STEP 2: Parse and validate the incoming payload ───────────────────────
-  let parsedBody: unknown;
+  let body: any;
   try {
-    parsedBody = JSON.parse(rawBody);
-  } catch (err) {
-    logger.error({ requestId, msg: "Failed to parse webhook body", err });
+    body = JSON.parse(rawBody);
+  } catch {
     return response(400, { error: "Bad Request: Invalid JSON body" });
   }
 
-<<<<<<< Updated upstream
-  const validationResult = validatePayload(githubPushSchema, parsedBody);
-=======
   logger.info({ requestId, githubEvent, msg: "GitHub webhook received" });
 
   // ── Route by event type ───────────────────────────────────────────────────
@@ -111,9 +106,9 @@ async function handlePullRequest(
   body: any
 ): Promise<APIGatewayProxyResult> {
   const { action, pull_request: pr, repository } = body;
-  const repoId = String(repository?.id ?? "");
-  const prNumber = pr?.number;
-  const now = new Date().toISOString();
+  const repoId    = String(repository?.id ?? "");
+  const prNumber  = pr?.number;
+  const now       = new Date().toISOString();
 
   logger.info({ requestId, action, prNumber, repoId, msg: "pull_request event" });
 
@@ -125,21 +120,21 @@ async function handlePullRequest(
       new PutCommand({
         TableName: SENTINEL_TABLE,
         Item: {
-          id: scanId,
+          id:          scanId,
           repoId,
-          recordType: "PR_REVIEW",
+          recordType:  "PR_REVIEW",
           prNumber,
-          title: pr?.title ?? `PR #${prNumber}`,
-          author: pr?.user?.login ?? "unknown",
-          branch: pr?.head?.ref ?? "",
-          state: "open",
-          status: "queued",
-          riskScore: 0,
-          riskLevel: "low",
-          findings: [],
-          diffUrl: pr?.html_url ?? "",
-          createdAt: pr?.created_at ?? now,
-          updatedAt: now,
+          title:       pr?.title ?? `PR #${prNumber}`,
+          author:      pr?.user?.login ?? "unknown",
+          branch:      pr?.head?.ref ?? "",
+          state:       "open",
+          status:      "queued",
+          riskScore:   0,
+          riskLevel:   "low",
+          findings:    [],
+          diffUrl:     pr?.html_url ?? "",
+          createdAt:   pr?.created_at ?? now,
+          updatedAt:   now,
         },
       })
     );
@@ -152,11 +147,11 @@ async function handlePullRequest(
         Item: {
           runId,
           repoId,
-          branch: pr?.head?.ref ?? "",
-          commitSha: pr?.head?.sha ?? "",
-          trigger: "pull_request",
-          status: "queued",
-          startedAt: now,
+          branch:     pr?.head?.ref ?? "",
+          commitSha:  pr?.head?.sha ?? "",
+          trigger:    "pull_request",
+          status:     "queued",
+          startedAt:  now,
           stepStates: {},
         },
       })
@@ -186,20 +181,20 @@ async function handlePullRequestReview(
 ): Promise<APIGatewayProxyResult> {
   const { review, pull_request: pr, repository } = body;
   const repoId = String(repository?.id ?? "");
-  const now = new Date().toISOString();
+  const now    = new Date().toISOString();
 
   await _docClient.send(
     new PutCommand({
       TableName: ACTIVITY_TABLE,
       Item: {
-        id: `evt_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+        id:        `evt_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
         repoId,
-        repoName: repository?.name ?? "",
-        agent: "sentinel",
-        message: `PR #${pr?.number} review: ${review?.state ?? "submitted"}`,
-        severity: "info",
+        repoName:  repository?.name ?? "",
+        agent:     "sentinel",
+        message:   `PR #${pr?.number} review: ${review?.state ?? "submitted"}`,
+        severity:  "info",
         timestamp: now,
-        read: false,
+        read:      false,
       },
     })
   );
@@ -218,20 +213,20 @@ async function handleDeployment(
 ): Promise<APIGatewayProxyResult> {
   const { deployment, repository } = body;
   const repoId = String(repository?.id ?? "");
-  const now = new Date().toISOString();
+  const now    = new Date().toISOString();
 
   await _docClient.send(
     new PutCommand({
       TableName: TIMELINE_TABLE,
       Item: {
-        id: `deploy_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+        id:          `deploy_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
         repoId,
         positionPct: 100, // Latest event is at 100%; historical events scaled later
-        label: `Deploy ${deployment?.ref ?? ""}`,
-        color: "#22c55e",
+        label:       `Deploy ${deployment?.ref ?? ""}`,
+        color:       "#22c55e",
         environment: deployment?.environment ?? "production",
-        deployedAt: deployment?.created_at ?? now,
-        createdAt: now,
+        deployedAt:  deployment?.created_at  ?? now,
+        createdAt:   now,
       },
     })
   );
@@ -240,12 +235,12 @@ async function handleDeployment(
     new PutCommand({
       TableName: process.env.DEPLOYS_TABLE ?? "velocis-deployments",
       Item: {
-        id: `deploy_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
+        id:          `deploy_${randomUUID().replace(/-/g, "").slice(0, 10)}`,
         repoId,
-        repoName: repository?.name ?? "",
-        environment: deployment?.environment ?? "production",
-        deployedAt: deployment?.created_at ?? now,
-        status: "success",
+        repoName:    repository?.name          ?? "",
+        environment: deployment?.environment   ?? "production",
+        deployedAt:  deployment?.created_at    ?? now,
+        status:      "success",
       },
     })
   );
@@ -265,17 +260,9 @@ async function handlePush(
 ): Promise<APIGatewayProxyResult> {
   // ── Validate the push payload schema ─────────────────────────────────────
   const validationResult = validatePayload(githubPushSchema, webhookBody);
->>>>>>> Stashed changes
   if (!validationResult.success) {
-    logger.warn({
-      requestId,
-      msg: "Payload validation failed",
-      errors: validationResult.errors,
-    });
-    return response(400, {
-      error: "Bad Request: Invalid payload schema",
-      details: validationResult.errors,
-    });
+    logger.warn({ requestId, msg: "Push payload validation failed", errors: validationResult.errors });
+    return response(400, { error: "Bad Request: Invalid payload schema", details: validationResult.errors });
   }
 
   const webhookEvent = validationResult.data as PushEventPayload;
@@ -333,15 +320,23 @@ async function handlePush(
   });
 
   // Fetch the actual file contents from GitHub using installation token
+  if (!installation) {
+    logger.warn({ requestId, msg: "Push event missing installation context — cannot fetch token" });
+    return response(200, { status: "skipped", reason: "No installation context" });
+  }
+
   const installationToken = await repoOps.getInstallationToken(
     installation.id
   );
 
-  const fileContents = await repoOps.fetchFileContents({
+  const fileContentsResult = await repoOps.fetchFileContents({
     repoFullName,
     filePaths: uniqueChangedFiles,
     token: installationToken,
   });
+  const fileContents: Record<string, string> = Object.fromEntries(
+    Object.entries(fileContentsResult.files).map(([k, v]) => [k, v.content])
+  );
 
   // ── STEP 5: Persist activity snapshot to DynamoDB ─────────────────────────
   const repoRecord: Partial<Repository> = {
@@ -361,7 +356,7 @@ async function handlePush(
 
   logger.info({
     requestId,
-    repoId,
+    repoId: String(repoId),
     msg: "Repository record updated in DynamoDB — status: processing",
   });
 
@@ -394,7 +389,7 @@ async function handlePush(
 
   logger.info({
     requestId,
-    repoId,
+    repoId: String(repoId),
     msg: "All agents completed — final status saved",
     status: agentResults.overallStatus,
   });
@@ -440,17 +435,11 @@ async function runAgentPipeline(ctx: {
     withTimeout(
       analyzeLogic({
         repoId,
-<<<<<<< Updated upstream
-        fileContents,
-        repoFullName,
-        installationToken,
-=======
         repoOwner: repoFullName.split("/")[0] ?? "",
-        repoName: repoFullName.split("/")[1] ?? "",
+        repoName:  repoFullName.split("/")[1] ?? "",
         filePaths: uniqueChangedFiles,
         commitSha: String(repoId),
         accessToken: installationToken,
->>>>>>> Stashed changes
       }),
       AGENT_TIMEOUT_MS,
       "Sentinel"
@@ -458,17 +447,12 @@ async function runAgentPipeline(ctx: {
 
     // CORTEX: Rebuild the dependency graph for the 3D canvas
     withTimeout(
-      graphBuilder({
+      buildCortexGraph({
         repoId,
-<<<<<<< Updated upstream
-        filePaths: uniqueChangedFiles,
-        fileContents,
-=======
         repoOwner: repoFullName.split("/")[0] ?? "",
-        repoName: repoFullName.split("/")[1] ?? "",
+        repoName:  repoFullName.split("/")[1] ?? "",
         accessToken: installationToken,
         forceRebuild: true,
->>>>>>> Stashed changes
       }),
       AGENT_TIMEOUT_MS,
       "Cortex"
@@ -485,49 +469,22 @@ async function runAgentPipeline(ctx: {
     cortexStatus: cortex.status,
   });
 
-  // ── Sync cortex graph → service-level table for the 3D frontend canvas ───
-  if (cortex.status === "success" && cortex.data) {
-    try {
-      await withTimeout(
-        syncCortexServices(repoId, cortex.data as any),
-        10_000,
-        "CortexSync"
-      );
-      logger.info({ requestId, msg: "Cortex service sync completed" });
-    } catch (syncErr) {
-      logger.error({ requestId, syncErr }, "Cortex service sync failed — non-fatal");
-      // Non-fatal: the file-level graph is still cached; service map just won't update this push
-    }
-  }
+  // ── Phase B: Fortress Analysis — runs after Sentinel ───────────────────────
+  // QA Strategist generates a test plan; API Documenter produces API docs.
+  // Both run in parallel against the combined changed file contents.
+  logger.info({ requestId, msg: "Phase B: Launching Fortress analysis pipeline" });
 
-  // ── Phase B: Fortress TDD — runs after Sentinel ───────────────────────────
-  // We pass Sentinel's review output to Fortress so test generation is
-  // context-aware of flagged issues.
-  logger.info({ requestId, msg: "Phase B: Launching Fortress TDD pipeline" });
+  const combinedContent = Object.entries(fileContents)
+    .map(([path, content]) => `// File: ${path}\n${content}`)
+    .join("\n\n");
 
   let fortress: AgentResult;
   try {
-    const fortressOutput = await withTimeout(
-      writeTests({
-        repoId,
-<<<<<<< Updated upstream
-        fileContents,
-        sentinelReview: sentinel.data ?? null,
-        repoFullName,
-        installationToken,
-=======
-        repoOwner: repoFullName.split("/")[0] ?? "",
-        repoName: repoFullName.split("/")[1] ?? "",
-        filePath: uniqueChangedFiles[0] ?? "",
-        commitSha: String(repoId),
-        accessToken: installationToken,
-        maxAttempts: 3,
->>>>>>> Stashed changes
-      }),
-      AGENT_TIMEOUT_MS,
-      "Fortress"
-    );
-    fortress = { status: "success", data: fortressOutput };
+    const [qaTestPlan, apiDocs] = await Promise.all([
+      withTimeout(generateQATestPlan(combinedContent), AGENT_TIMEOUT_MS, "Fortress-QA"),
+      withTimeout(generateApiDocs(combinedContent), AGENT_TIMEOUT_MS, "Fortress-Docs"),
+    ]);
+    fortress = { status: "success", data: { qaTestPlan, apiDocs } };
   } catch (err) {
     logger.error({ requestId, msg: "Fortress agent failed", err });
     fortress = { status: "failed", error: String(err), data: null };
@@ -542,8 +499,8 @@ async function runAgentPipeline(ctx: {
   // ── Determine overall pipeline health ────────────────────────────────────
   const overallStatus =
     sentinel.status === "success" &&
-      fortress.status === "success" &&
-      cortex.status === "success"
+    fortress.status === "success" &&
+    cortex.status === "success"
       ? "healthy"
       : "degraded";
 

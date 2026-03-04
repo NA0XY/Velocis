@@ -4,12 +4,13 @@
 
 export interface User {
     // ── Primary Key ────────────────────────────────────────────────────────────
+    userId: string;                 // Velocis user ID (string GitHub user ID)
     githubId: string;               // GitHub's unique user ID (string for DynamoDB compatibility)
 
     // ── GitHub Profile ─────────────────────────────────────────────────────────
     username: string;               // GitHub login handle (e.g. "NA0XY")
     displayName: string;            // GitHub full name (e.g. "Rishi")
-    email: string;                  // Primary verified email from GitHub
+    email?: string;                 // Primary verified email from GitHub
     avatarUrl: string;              // GitHub avatar URL
     githubProfileUrl: string;       // https://github.com/{username}
 
@@ -19,7 +20,8 @@ export interface User {
 
     // ── Encrypted OAuth Tokens (AES-256-GCM) ──────────────────────────────────
     // Tokens are ALWAYS stored encrypted — never plaintext
-    encryptedAccessToken: string;   // Encrypted GitHub user OAuth access token
+    accessToken?: string;           // Encrypted GitHub user OAuth access token (key used by callback)
+    encryptedAccessToken?: string;  // Alternate field name for backward-compat
     encryptedRefreshToken?: string; // Encrypted refresh token (only if token expiry is enabled)
     tokenExpiresAt?: string;        // ISO timestamp when access token expires
 
@@ -38,13 +40,14 @@ export interface User {
 
 export type SafeUser = Omit<
     User,
-    "encryptedAccessToken" | "encryptedRefreshToken" | "tokenExpiresAt"
+    "accessToken" | "encryptedAccessToken" | "encryptedRefreshToken" | "tokenExpiresAt"
 >;
 
 // Helper to strip sensitive fields from a User record
 export function toSafeUser(user: User): SafeUser {
     const {
-        encryptedAccessToken: _a,
+        accessToken: _a,
+        encryptedAccessToken: _e,
         encryptedRefreshToken: _r,
         tokenExpiresAt: _t,
         ...safe
