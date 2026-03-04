@@ -35,6 +35,7 @@ import * as postChatMessage from "./src/handlers/api/postChatMessage";
 import * as getRepos from "./src/handlers/api/getRepos";
 import * as githubPush from "./src/handlers/webhooks/githubPush";
 import * as predictInfrastructure from "./src/handlers/api/predictInfrastructure";
+import * as deleteRepo from "./src/handlers/api/deleteRepo";
 
 // ── App setup ────────────────────────────────────────────────────────────────
 const app = express();
@@ -239,6 +240,8 @@ app.get("/api/dashboard", wrap(getDashboard.handler as LambdaHandler));
 
 // § 6 — Repository overview
 app.get("/api/repos/:repoId", wrap(getRepoOverview.handler as LambdaHandler));
+// § 6b — Delete repo
+app.delete("/api/repos/:repoId", wrap(deleteRepo.handler as LambdaHandler));
 
 // § 7 — Sentinel agent
 app.get("/api/repos/:repoId/sentinel/prs", wrap(getSentinelData.listPrs as LambdaHandler));
