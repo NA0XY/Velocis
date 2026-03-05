@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   CheckCircle, Shield, TestTube2, Eye, GitBranch,
@@ -18,6 +18,15 @@ function authFetch(url: string): Promise<Response> {
 }
 import { CommitBarChart } from './DashboardPage';
 import LoadingAnimation from '../components/LoadingAnimation';
+import RippleGrid from '../../components/RippleGrid';
+import CardSwap, { Card } from '../../components/CardSwap';
+import Hyperspeed from '../../components/Hyperspeed';
+import { hyperspeedPresets } from '../../components/HyperSpeedPresets';
+import MetallicPaint from '../../components/MetallicPaint';
+import iconVisualCortex from '../../components/visualcortex.png';
+import iconPipeline from '../../components/pipeline.png';
+import iconWorkspace from '../../components/workspace.png';
+import iconInfrastructure from '../../components/infrastructure (1).png';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
@@ -136,6 +145,130 @@ const PRRiskBars = ({ data }: { data: any[] }) => {
     </div>
   );
 };
+
+// ── Custom card icons ────────────────────────────────────────────────────────
+const IconEye = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+  <img src={iconVisualCortex} className={className} style={{ ...style, objectFit: 'contain' }} alt="Visual Cortex" />
+);
+const IconPipeline = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+  <img src={iconPipeline} className={className} style={{ ...style, objectFit: 'contain' }} alt="Pipeline" />
+);
+const IconWorkspace = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+  <img src={iconWorkspace} className={className} style={{ ...style, objectFit: 'contain' }} alt="Workspace" />
+);
+const IconInfrastructure = ({ className, style }: { className?: string; style?: React.CSSProperties }) => (
+  <img src={iconInfrastructure} className={className} style={{ ...style, objectFit: 'contain' }} alt="Infrastructure" />
+);
+
+const WorkspaceCardSwap = ({ data, isDarkMode, accentColor }: { data: any[], isDarkMode: boolean, accentColor: string }) => {
+  const displayData = data.length > 0
+    ? data.slice(0, 4).map(p => ({ label: `PR #${p.pr_number}`, risk: p.risk_score }))
+    : prData.slice(0, 4);
+
+  return (
+    <div className="w-full h-full flex items-center justify-center relative overflow-visible">
+      <CardSwap
+        width={160}
+        height={100}
+        cardDistance={30}
+        verticalDistance={40}
+        delay={5000}
+        pauseOnHover={false}
+      >
+        {displayData.map((d, i) => (
+          <Card
+            key={i}
+            className="flex flex-col p-3 shadow-xl rounded-xl border bg-zinc-900 border-zinc-700 text-white dark:bg-white dark:border-zinc-200 dark:text-zinc-900"
+          >
+            <div className="text-[9px] font-bold mb-1 font-mono uppercase tracking-wider" style={{ color: accentColor }}>{d.label}</div>
+            <div className="flex-1 flex flex-col justify-center">
+              <div className="text-xl font-bold tabular-nums">{d.risk}%</div>
+              <div className="text-[8px] text-zinc-400 uppercase font-bold tracking-widest mt-0.5">Risk Score</div>
+            </div>
+            <div className="w-full h-1 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-2 overflow-hidden">
+              <div
+                className="h-full"
+                style={{ width: `${d.risk}%`, backgroundColor: accentColor }}
+              />
+            </div>
+          </Card>
+        ))}
+      </CardSwap>
+    </div>
+  );
+};
+
+const QAPipelineHyperspeed = ({ isDarkMode }: { isDarkMode: boolean }) => {
+  const hyperspeedOptions = useMemo(() => {
+    // Start with preset one (Cyberpunk) but customize for "wavy" and "black road"
+    const preset = hyperspeedPresets.one;
+    return {
+      ...preset,
+      distortion: "turbulentDistortion",
+      length: 400,
+      roadWidth: 10,
+      islandWidth: 2,
+      lanesPerRoad: 3,
+      fov: 90,
+      speedUp: 3,
+      totalSideLightSticks: 50,
+      lightPairsPerRoadWay: 70,
+      colors: {
+        ...preset.colors,
+        roadColor: 0x000000,
+        islandColor: 0x000000,
+        background: 0x000000,
+        shoulderLines: 0x000000,
+        brokenLines: 0x000000,
+        // Diversified multi-color palette
+        leftCars: [0x6366f1, 0x4f46e5, 0x4338ca, 0x818cf8, 0xa5b4fc], // Purple/Indigo spectrum
+        rightCars: [0x3b82f6, 0x60a5fa, 0x93c5fd, 0x2563eb, 0x1d4ed8], // Blue spectrum
+        sticks: 0x3b82f6
+      }
+    };
+  }, [isDarkMode]);
+
+  return (
+    <div className="w-full h-full min-h-[300px] max-h-[400px] relative overflow-hidden rounded-xl bg-black">
+      <Hyperspeed effectOptions={hyperspeedOptions} />
+    </div>
+  );
+};
+const QAPipelineInfrastructure = ({ isDarkMode }: { isDarkMode: boolean }) => {
+  return (
+    <div
+      className="w-full h-full relative overflow-hidden rounded-xl flex items-center justify-center p-4"
+      style={{ backgroundColor: isDarkMode ? "#000000" : "#ffffff" }}
+    >
+      <div className="w-full h-full relative">
+        <MetallicPaint
+          imageSrc="/src/components/MetallicPaint.svg"
+          seed={42}
+          scale={2.5}
+          patternSharpness={1.2}
+          noiseScale={0.8}
+          speed={0.4}
+          liquid={0.9}
+          mouseAnimation={false}
+          brightness={isDarkMode ? 2.2 : 1.1}
+          contrast={isDarkMode ? 0.6 : 0.9}
+          refraction={0.015}
+          blur={0.012}
+          chromaticSpread={2.5}
+          fresnel={1.2}
+          angle={0}
+          waveAmplitude={1.2}
+          distortion={0.8}
+          contour={0.2}
+          lightColor={isDarkMode ? "#ffffff" : "#c0c0c0"}
+          darkColor={isDarkMode ? "#2a2a2a" : "#3a3a3a"}
+          tintColor={isDarkMode ? "#aaaaaa" : "#707070"}
+        />
+      </div>
+    </div>
+  );
+};
+
 
 
 // â”€â”€â”€ GitHub-style Mini Bar Chart (replaces wavy line for "QA Pipeline") â”€â”€â”€â”€â”€
@@ -325,39 +458,56 @@ export function RepositoryPage() {
     {
       title: "Launch Visual Cortex",
       description: "Spin up a full preview environment with live trace data attached.",
-      icon: Eye,
+      icon: IconEye,
       accentColor: "#10b981",
       action: () => navigate(`/repo/${id}/cortex`),
       cta: "Visual Cortex",
-      preview: <MiniTerminal />,
+      preview: (
+        <div className="w-full h-full relative overflow-hidden">
+          <RippleGrid
+            enableRainbow={false}
+            gridColor={isDarkMode ? "#10b981" : "#059669"}
+            rippleIntensity={0.05}
+            gridSize={10}
+            gridThickness={15}
+            fadeDistance={1.5}
+            vignetteStrength={2}
+            glowIntensity={0.1}
+            opacity={1}
+            gridRotation={0}
+            mouseInteraction
+            mouseInteractionRadius={1}
+          />
+        </div>
+      ),
     },
     {
       title: "Enter Workspace",
       description: "Review current open risk items directly inside the code flow.",
-      icon: FileText,
+      icon: IconWorkspace,
       accentColor: "#6366f1",
       action: () => navigate(`/repo/${id}/workspace`),
       cta: "Workspace",
-      preview: <PRRiskBars data={prs} />,
+      preview: <WorkspaceCardSwap data={prs} isDarkMode={isDarkMode} accentColor="#6366f1" />,
     },
     {
       title: "QA Pipeline Data",
       description: "View current build history, test suites, and performance metrics.",
-      icon: TestTube2,
+      icon: IconPipeline,
       accentColor: "#3b82f6",
       action: () => navigate(`/repo/${id}/pipeline`),
       cta: "QA Pipeline",
-      preview: <QABarChart runs={pipelineRuns} />,
+      preview: <QAPipelineHyperspeed isDarkMode={isDarkMode} />,
     },
 
     {
       title: "Infrastructure View",
       description: "AWS status, resource load, and live cost tracking tools.",
-      icon: Cloud,
+      icon: IconInfrastructure,
       accentColor: "#f59e0b",
       action: () => navigate(`/repo/${id}/infrastructure`),
       cta: "Infrastructure",
-      preview: <AWSResourceList data={infraData} />,
+      preview: <QAPipelineInfrastructure isDarkMode={isDarkMode} />,
     }
 
   ];
@@ -526,7 +676,7 @@ export function RepositoryPage() {
                             className="w-9 h-9 rounded-lg flex items-center justify-center mb-4"
                             style={{ backgroundColor: `${card.accentColor}15`, border: `1px solid ${card.accentColor}30` }}
                           >
-                            <card.icon className="w-[18px] h-[18px]" style={{ color: card.accentColor }} />
+                            <card.icon className="w-[31px] h-[31px]" style={{ filter: isDarkMode ? 'invert(1)' : 'none' }} />
                           </div>
                           <div className="text-lg font-bold text-zinc-900 dark:text-white mb-2 tracking-tight">{card.title}</div>
                           <div className="text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400 mb-6 flex-1">{card.description}</div>

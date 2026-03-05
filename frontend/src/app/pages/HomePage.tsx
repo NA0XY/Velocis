@@ -110,39 +110,83 @@ const LANDING_CSS = `
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
 }
 
-/* ── CTA Button – lift + ripple-after animation ── */
-.cta-btn {
+/* ── Peel Button — sticker peel animation ── */
+.peel-btn {
   position: relative;
-  transition: transform 0.2s, box-shadow 0.2s;
-  overflow: visible;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+  border-radius: var(--radius-button, 8px);
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
 }
-.cta-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
-.cta-btn:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-}
-.cta-btn:active {
-  transform: translateY(-1px);
-  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
-}
-.cta-btn::after {
+.peel-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+
+/* ::after = solid fill overlay that peels diagonally bottom-right → top-left */
+.peel-btn::after {
   content: '';
-  display: inline-block;
-  height: 100%;
-  width: 100%;
-  border-radius: inherit;
   position: absolute;
-  top: 0; left: 0;
-  z-index: -1;
-  background-color: var(--cta-primary, #6366f1);
-  transition: transform 0.4s, opacity 0.4s;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+  transition: clip-path 0.55s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.cta-btn:hover::after {
-  transform: scaleX(1.4) scaleY(1.6);
-  opacity: 0;
+.peel-btn:hover::after {
+  clip-path: polygon(0% 0%, 0% 0%, 0% 0%, 0% 0%);
 }
-.cta-btn--blue::after  { background-color: var(--cta-primary, #6366f1); }
-.cta-btn--violet::after { background-color: var(--cta-primary, #6366f1); }
+
+/* ::before = white fold triangle appearing at bottom-right as peel travels */
+.peel-btn::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-color: transparent transparent rgba(255,255,255,0.75) transparent;
+  border-width: 0;
+  border-radius: 0 0 var(--radius-button, 8px) 0;
+  pointer-events: none;
+  z-index: 2;
+  transition: border-width 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.peel-btn:hover::before { border-width: 0 0 38px 38px; }
+
+/* label — floats above both pseudo-elements */
+.peel-btn__label {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Dark variant (hero, light backgrounds) ── */
+.peel-btn--dark { background: transparent; border: 2px solid #151515; }
+.peel-btn--dark::after { background: #151515; }
+.peel-btn--dark .peel-btn__label { color: #fff; }
+.peel-btn--dark:hover .peel-btn__label { color: #151515; transition: color 0.08s ease 0.38s; }
+
+/* ── Outline variant (hero secondary, light backgrounds) ── */
+.peel-btn--outline { background: transparent; border: 2px solid rgba(21,21,21,0.3); }
+.peel-btn--outline::after { background: rgba(21,21,21,0.07); }
+.peel-btn--outline .peel-btn__label { color: #151515; }
+
+/* ── Primary teal (CTA, dark backgrounds) ── */
+.peel-btn--primary { background: transparent; border: 2px solid #3BBB96; }
+.peel-btn--primary::after { background: #3BBB96; }
+.peel-btn--primary .peel-btn__label { color: #151515; }
+.peel-btn--primary:hover .peel-btn__label { color: #3BBB96; transition: color 0.08s ease 0.38s; }
+
+/* ── Outline-inverse (CTA secondary, dark backgrounds) ── */
+.peel-btn--outline-inv { background: transparent; border: 2px solid rgba(255,255,255,0.25); }
+.peel-btn--outline-inv::after { background: rgba(255,255,255,0.08); }
+.peel-btn--outline-inv .peel-btn__label { color: #fff; }
 `;
 
 // ─────────────────────────────────────────────
@@ -296,11 +340,11 @@ function Hero() {
                 </p>
 
                 <div className="hero-anim flex flex-col sm:flex-row gap-4 mb-24">
-                    <button onClick={() => navigate('/auth')} className="cta-btn cta-btn--blue flex items-center gap-2 px-8 py-4 rounded-button font-medium" style={{ backgroundColor: 'var(--cta-primary, #1c1c1c)', color: 'var(--cta-text, #fff)' }}>
-                        <Github size={20} /> Connect Repository
+                    <button onClick={() => navigate('/auth')} className="peel-btn peel-btn--dark px-8 py-4">
+                        <span className="peel-btn__label"><Github size={20} /> Connect Repository</span>
                     </button>
-                    <button className="flex items-center gap-2 bg-transparent text-textMain border border-borderSubtle px-8 py-4 rounded-button font-medium hover:bg-surface transition-colors duration-300">
-                        <Play size={20} /> Watch Demo
+                    <button className="peel-btn peel-btn--outline px-8 py-4">
+                        <span className="peel-btn__label"><Play size={20} /> Watch Demo</span>
                     </button>
                 </div>
 
@@ -1283,8 +1327,12 @@ function CTA() {
                 </p>
                 <TextGenerate delay={0.8}>
                     <div className="flex flex-col sm:flex-row gap-4">
-                        <button onClick={() => navigate('/auth')} className="cta-btn cta-btn--blue px-10 py-5 rounded-button font-bold text-lg cursor-pointer" style={{ backgroundColor: 'var(--cta-primary, #6366f1)', color: 'var(--cta-text, #fff)' }}>Connect Repository Free</button>
-                        <button className="bg-transparent text-textInverse border border-borderInv px-10 py-5 rounded-button font-bold text-lg hover:bg-white/5 hover:scale-105 active:scale-95 transition-all cursor-pointer">Read the Docs</button>
+                        <button onClick={() => navigate('/auth')} className="peel-btn peel-btn--primary px-10 py-5 font-bold text-lg">
+                            <span className="peel-btn__label">Connect Repository Free</span>
+                        </button>
+                        <button className="peel-btn peel-btn--outline-inv px-10 py-5 font-bold text-lg">
+                            <span className="peel-btn__label">Read the Docs</span>
+                        </button>
                     </div>
                 </TextGenerate>
             </div>

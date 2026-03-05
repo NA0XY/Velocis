@@ -8,7 +8,7 @@ import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
 import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { getDocClient, dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
+import { getUserToken, getInstallationToken } from "../../services/github/auth";
 import { logger } from "../../utils/logger";
 import { ok, errors } from "../../utils/apiResponse";
 import { config } from "../../utils/config";
@@ -63,20 +63,6 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       return errors.unauthorized("Session expired");
     }
 
-    logger.info({ githubId: sessionRecord.githubId }, 'Getting GitHub token');
-    let githubToken: string;
-    try {
-      githubToken = await getUserToken(sessionRecord.githubId);
-      logger.info({ hasToken: !!githubToken }, 'GitHub token retrieved');
-    } catch (tokenError) {
-      logger.error({ error: tokenError, githubId: sessionRecord.githubId, stack: tokenError instanceof Error ? tokenError.stack : undefined }, 'Failed to get GitHub token');
-      throw tokenError;
-    }
-
-    if (!githubToken) {
-      return errors.unauthorized("No GitHub token found");
-    }
-
     // 2. Get repo details from DynamoDB
     const repoResult = await docClient.send(
       new ScanCommand({
@@ -93,7 +79,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const repo = repoResult.Items[0];
     logger.info({ repoId: repo.repoId, repoFullName: repo.repoFullName, repoOwner: repo.repoOwner, repoName: repo.repoName }, 'Found repo');
 
-    // Use repoFullName from DB, or construct from parts, or use repoId as fallback
+    // Prefer the GitHub App installation token — it has full, scoped access to
+    // the repo and is always fresh.  Fall back to the user OAuth token only if
+    // no installationId is stored (e.g. older installs before App auth was added).
+    let githubToken: string;
+    const installationId = repo.installationId ? Number(repo.installationId) : undefined;
+    if (installationId) {
+      logger.info({ installationId }, 'Using GitHub App installation token for rebuild');
+      try {
+        githubToken = await getInstallationToken(installationId);
+      } catch (tokenErr) {
+        logger.warn({ installationId, err: tokenErr }, 'Installation token failed — falling back to user OAuth token');
+        githubToken = await getUserToken(sessionRecord.githubId);
+      }
+    } else {
+      logger.info({ githubId: sessionRecord.githubId }, 'No installationId on repo — using user OAuth token');
+      githubToken = await getUserToken(sessionRecord.githubId);
+    }
+
+    // Resolve owner / name from the repo record
     let owner: string;
     let name: string;
 
