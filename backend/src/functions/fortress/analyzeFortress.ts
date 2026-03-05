@@ -25,7 +25,11 @@ import {
 // never hard-coded.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const bedrockClient = new BedrockRuntimeClient({ region: "us-east-1" });
+// 90-second hard timeout on the HTTP socket — prevents Bedrock from hanging
+const bedrockClient = new BedrockRuntimeClient({
+  region: "us-east-1",
+  requestHandler: { requestTimeout: 90_000 } as any,
+});
 
 const DEEPSEEK_MODEL = "deepseek.v3.2";
 
@@ -97,7 +101,17 @@ export async function generateQATestPlan(codeContent: string): Promise<string> {
   };
 
   const command = new ConverseCommand(input);
-  const response = await bedrockClient.send(command);
+
+  // AbortController gives the AWS SDK a signal to cancel the in-flight
+  // HTTP request — otherwise a hung Bedrock socket keeps Node alive forever.
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), 85_000); // slightly under client timeout
+  let response;
+  try {
+    response = await bedrockClient.send(command, { abortSignal: abort.signal });
+  } finally {
+    clearTimeout(abortTimer);
+  }
 
   // Safely extract the text from the response
   const content = response.output?.message?.content;

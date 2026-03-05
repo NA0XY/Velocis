@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Loader2, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw } from 'lucide-react';
+import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw, Check, X } from 'lucide-react';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
@@ -43,6 +43,7 @@ interface InfrastructurePlan {
 
 interface AutomationReportData {
     status: string;
+    error?: string | null;
     sentinel: {
         overallRisk: string;
         riskScore: number;
@@ -69,7 +70,26 @@ interface AutomationReportData {
             afterSentinelChanges: InfrastructurePlan | null;
         } | null;
     } | null;
+    progress?: AutomationPipelineProgress | null;
     lastUpdatedAt: string | null;
+}
+
+type PipelineStepKey = 'prepare' | 'sentinel' | 'fortress' | 'infrastructure' | 'projected';
+type PipelineStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+interface AutomationPipelineStep {
+    key: PipelineStepKey;
+    label: string;
+    status: PipelineStepStatus;
+    detail?: string;
+    startedAt?: string;
+    completedAt?: string;
+    updatedAt?: string;
+}
+
+interface AutomationPipelineProgress {
+    currentStepKey: PipelineStepKey;
+    steps: AutomationPipelineStep[];
 }
 
 const severityColors: Record<string, { bg: string; text: string; dot: string }> = {
@@ -87,6 +107,261 @@ const riskColors: Record<string, string> = {
     low: 'text-emerald-500',
     clean: 'text-emerald-500',
 };
+
+const PIPELINE_STEP_ORDER: PipelineStepKey[] = ['prepare', 'sentinel', 'fortress', 'infrastructure', 'projected'];
+
+const PIPELINE_META: Record<PipelineStepKey, { label: string; detail: string; icon: React.ComponentType<{ className?: string }> }> = {
+    prepare: {
+        label: 'Repository Preparation',
+        detail: 'Scanning source files and preparing analysis context',
+        icon: FileCode,
+    },
+    sentinel: {
+        label: 'Sentinel Review',
+        detail: 'Security, logic, and architecture deep review',
+        icon: Shield,
+    },
+    fortress: {
+        label: 'Fortress QA Plan',
+        detail: 'Generating test cases and stability guidance',
+        icon: TestTube2,
+    },
+    infrastructure: {
+        label: 'Infrastructure Baseline',
+        detail: 'Estimating cloud resources and baseline costs',
+        icon: Cloud,
+    },
+    projected: {
+        label: 'Projected Infrastructure',
+        detail: 'Forecasting infra after Sentinel recommendations',
+        icon: Bot,
+    },
+};
+
+const STATUS_LABELS: Record<PipelineStepStatus, string> = {
+    pending: 'Pending',
+    running: 'In progress',
+    completed: 'Completed',
+    failed: 'Failed',
+    skipped: 'Skipped',
+};
+
+function getFallbackProgress(status: string): AutomationPipelineProgress {
+    return {
+        currentStepKey: 'prepare',
+        steps: PIPELINE_STEP_ORDER.map((key, index) => ({
+            key,
+            label: PIPELINE_META[key].label,
+            status: status === 'completed' ? 'completed' : (status === 'running' && index === 0 ? 'running' : 'pending'),
+            detail: PIPELINE_META[key].detail,
+        })),
+    };
+}
+
+function normalizeProgress(progress: AutomationPipelineProgress | null | undefined, status: string): AutomationPipelineProgress {
+    const fallback = getFallbackProgress(status);
+    if (!progress?.steps?.length) return fallback;
+
+    const existing = new Map(progress.steps.map((step) => [step.key, step]));
+    return {
+        currentStepKey: progress.currentStepKey ?? fallback.currentStepKey,
+        steps: PIPELINE_STEP_ORDER.map((key) => {
+            const step = existing.get(key);
+            return {
+                key,
+                label: step?.label ?? PIPELINE_META[key].label,
+                status: step?.status ?? 'pending',
+                detail: step?.detail ?? PIPELINE_META[key].detail,
+                startedAt: step?.startedAt,
+                completedAt: step?.completedAt,
+                updatedAt: step?.updatedAt,
+            };
+        }),
+    };
+}
+
+function PipelineProgressPanel({
+    status,
+    progress,
+    title,
+    subtitle,
+    lastUpdatedAt,
+}: {
+    status: string;
+    progress?: AutomationPipelineProgress | null;
+    title: string;
+    subtitle: string;
+    lastUpdatedAt?: string | null;
+}) {
+    const normalized = normalizeProgress(progress, status);
+    const completedCount = normalized.steps.filter(s => s.status === 'completed' || s.status === 'skipped').length;
+    const pct = Math.round((completedCount / normalized.steps.length) * 100);
+
+    return (
+        <div className="w-full max-w-2xl mx-auto">
+            <style>{`
+                @keyframes shimmer-scan {
+                    0%   { transform: translateX(-150%); }
+                    100% { transform: translateX(350%); }
+                }
+                @keyframes pulse-ring-out {
+                    0%   { transform: scale(1); opacity: 0.6; }
+                    100% { transform: scale(1.8); opacity: 0; }
+                }
+                @keyframes travel-stripe {
+                    0%   { top: -24px; }
+                    100% { top: 100%; }
+                }
+                @keyframes blink-seq {
+                    0%, 70%, 100% { opacity: 1; }
+                    35% { opacity: 0.15; }
+                }
+                .pipe-shimmer { position: relative; overflow: hidden; }
+                .pipe-shimmer::after {
+                    content: '';
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(
+                        105deg,
+                        transparent 20%,
+                        rgba(255,255,255,0.065) 42%,
+                        rgba(255,255,255,0.13) 50%,
+                        rgba(255,255,255,0.065) 58%,
+                        transparent 80%
+                    );
+                    animation: shimmer-scan 2.2s ease-in-out infinite;
+                    pointer-events: none;
+                }
+                .pipe-ring {
+                    position: absolute;
+                    inset: -5px;
+                    border-radius: 16px;
+                    border: 1.5px solid rgba(99, 102, 241, 0.5);
+                    pointer-events: none;
+                    animation: pulse-ring-out 2s ease-out infinite;
+                }
+                .blink-dot { animation: blink-seq 1.4s ease-in-out infinite; }
+                .blink-dot:nth-child(2) { animation-delay: 0.22s; }
+                .blink-dot:nth-child(3) { animation-delay: 0.44s; }
+            `}</style>
+
+            {/* Header */}
+            <div className="mb-7">
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">{title}</h2>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1.5 leading-relaxed">{subtitle}</p>
+                {lastUpdatedAt && (
+                    <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-600">
+                        Last sync · {new Date(lastUpdatedAt).toLocaleTimeString()}
+                    </p>
+                )}
+            </div>
+
+            {/* Progress bar */}
+            <div className="mb-8 space-y-1.5">
+                <div className="flex justify-between items-center">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Pipeline</span>
+                    <span className="text-[11px] font-bold text-zinc-700 dark:text-zinc-200">{completedCount} / {normalized.steps.length}</span>
+                </div>
+                <div className="h-[3px] bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                        className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400 transition-all duration-700 ease-out"
+                        style={{ width: `${pct}%` }}
+                    />
+                </div>
+            </div>
+
+            {/* Step list */}
+            <div>
+                {normalized.steps.map((step, index) => {
+                    const meta = PIPELINE_META[step.key];
+                    const Icon = meta.icon;
+                    const isRunning   = step.status === 'running';
+                    const isCompleted = step.status === 'completed' || step.status === 'skipped';
+                    const isFailed    = step.status === 'failed';
+                    const isPending   = step.status === 'pending';
+                    const isLast      = index === normalized.steps.length - 1;
+
+                    return (
+                        <div key={step.key} className="flex gap-4">
+                            {/* ─ icon + connector ─ */}
+                            <div className="flex flex-col items-center" style={{ width: 48, minWidth: 48 }}>
+                                <div className={`relative w-12 h-12 rounded-[14px] flex items-center justify-center shrink-0 border-[1.5px] transition-colors duration-300 ${
+                                    isFailed    ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-300 dark:border-rose-700 text-rose-600 dark:text-rose-400' :
+                                    isRunning   ? 'bg-white dark:bg-zinc-900 border-indigo-400 dark:border-indigo-600 text-indigo-600 dark:text-indigo-400 shadow-[0_0_0_3px_rgba(99,102,241,0.12)]' :
+                                    isCompleted ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-400 dark:border-emerald-600 text-emerald-600 dark:text-emerald-400' :
+                                                  'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500'
+                                }`}>
+                                    {isCompleted ? <Check className="w-5 h-5" strokeWidth={2.5} /> :
+                                     isFailed    ? <X     className="w-5 h-5" strokeWidth={2.5} /> :
+                                                   <Icon  className="w-5 h-5" />}
+                                    {isRunning && <span className="pipe-ring" />}
+                                </div>
+
+                                {!isLast && (
+                                    <div className="relative w-[2px] flex-1 min-h-10 my-2 bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+                                        {isCompleted && (
+                                            <div className="absolute inset-0 bg-emerald-400 dark:bg-emerald-500 rounded-full" />
+                                        )}
+                                        {isRunning && (
+                                            <>
+                                                <div className="absolute inset-0 bg-indigo-200 dark:bg-indigo-800/40 rounded-full" />
+                                                <div
+                                                    className="absolute w-full h-6 rounded-full bg-indigo-500 dark:bg-indigo-400"
+                                                    style={{ animation: 'travel-stripe 1.5s ease-in-out infinite' }}
+                                                />
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ─ step card ─ */}
+                            <div className={`flex-1 min-w-0 ${isLast ? '' : 'pb-4'}`}>
+                                <div className={`relative rounded-xl border px-4 py-3.5 transition-colors duration-300 ${
+                                    isFailed    ? 'border-rose-200 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-900/10' :
+                                    isRunning   ? 'border-indigo-200 dark:border-indigo-700/50 bg-indigo-50/60 dark:bg-indigo-900/15 pipe-shimmer' :
+                                    isCompleted ? 'border-emerald-200/60 dark:border-emerald-800/25 bg-emerald-50/30 dark:bg-emerald-900/10' :
+                                                  'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900'
+                                }`}>
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className={`text-sm font-semibold mb-0.5 ${
+                                                isPending ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-900 dark:text-zinc-100'
+                                            }`}>
+                                                {step.label || meta.label}
+                                            </h3>
+                                            <p className={`text-xs leading-relaxed ${
+                                                isPending ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'
+                                            }`}>
+                                                {step.detail || meta.detail}
+                                            </p>
+                                            {isRunning && (
+                                                <div className="flex items-center gap-1.5 mt-2.5">
+                                                    <span className="blink-dot inline-block w-[5px] h-[5px] rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                                                    <span className="blink-dot inline-block w-[5px] h-[5px] rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                                                    <span className="blink-dot inline-block w-[5px] h-[5px] rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                                                    <span className="ml-1 text-[11px] font-medium text-indigo-500 dark:text-indigo-400">Processing</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md ${
+                                            isFailed    ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/40' :
+                                            isRunning   ? 'text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/40' :
+                                            isCompleted ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/30' :
+                                                          'text-zinc-400 dark:text-zinc-500 bg-zinc-100 dark:bg-zinc-800'
+                                        }`}>
+                                            {STATUS_LABELS[step.status]}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
 
 function FindingCard({ finding, index }: { finding: SentinelFinding; index: number }) {
     const [expanded, setExpanded] = useState(false);
@@ -131,7 +406,7 @@ function FindingCard({ finding, index }: { finding: SentinelFinding; index: numb
                     </div>
                     {finding.mentorExplanation && (
                         <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30 rounded-lg p-3">
-                            <h5 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1.5">💡 Why This Matters</h5>
+                            <h5 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1.5">Why This Matters</h5>
                             <p className="text-sm text-indigo-800 dark:text-indigo-300 leading-relaxed">{finding.mentorExplanation}</p>
                         </div>
                     )}
@@ -273,14 +548,18 @@ export function AutomationReportPage() {
             });
             if (!res.ok) {
                 if (res.status === 401) {
-                    setReport({ status: 'not_started', sentinel: null, fortress: null, infrastructure: null, lastUpdatedAt: null });
+                    setReport({ status: 'not_started', error: null, sentinel: null, fortress: null, infrastructure: null, progress: null, lastUpdatedAt: null });
                     setIsLoading(false);
                     return;
                 }
                 throw new Error(`HTTP ${res.status}`);
             }
             const data = await res.json();
-            setReport(data);
+            setReport({
+                ...data,
+                error: data.error ?? null,
+                progress: data.progress ?? null,
+            });
             setIsLoading(false);
         } catch (err: any) {
             setError(err.message || 'Error loading report');
@@ -310,9 +589,11 @@ export function AutomationReportPage() {
             setError(null);
             setReport({
                 status: 'running',
+                error: null,
                 sentinel: null,
                 fortress: null,
                 infrastructure: null,
+                progress: getFallbackProgress('running'),
                 lastUpdatedAt: new Date().toISOString(),
             });
         } catch (err: any) {
@@ -325,16 +606,24 @@ export function AutomationReportPage() {
     // Auto-poll while pipeline is running
     useEffect(() => {
         if (report?.status === 'running') {
-            const interval = setInterval(fetchReport, 8000);
+            const interval = setInterval(fetchReport, 3000);
             return () => clearInterval(interval);
         }
     }, [report?.status, fetchReport]);
 
     if (isLoading) {
         return (
-            <div className="w-full min-h-screen flex flex-col items-center justify-center bg-[#f6f7fb] dark:bg-[#0A0A0E] gap-3">
-                <Loader2 className="w-7 h-7 animate-spin text-indigo-500" />
-                <span className="text-sm text-zinc-400">Loading automation report...</span>
+            <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
+                <NavBar id={id} navigate={navigate} />
+                <div className="max-w-5xl mx-auto px-6 md:px-10 py-12">
+                    <PipelineProgressPanel
+                        status="running"
+                        progress={null}
+                        title="Loading Automation Report"
+                        subtitle="Syncing with backend pipeline state..."
+                        lastUpdatedAt={null}
+                    />
+                </div>
             </div>
         );
     }
@@ -350,29 +639,67 @@ export function AutomationReportPage() {
             </div>
         );
     }
-
     // Pipeline is running
     if (report?.status === 'running') {
         return (
             <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
                 <NavBar id={id} navigate={navigate} />
-                <div className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center text-center gap-6">
-                    <div className="w-20 h-20 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 flex items-center justify-center">
-                        <Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />
+                <div className="max-w-2xl mx-auto px-6 md:px-10 py-12 space-y-6">
+                    <PipelineProgressPanel
+                        status={report.status}
+                        progress={report.progress}
+                        title="Automation Pipeline Running"
+                        subtitle="Live backend updates from Sentinel, Fortress, and Infrastructure agents."
+                        lastUpdatedAt={report.lastUpdatedAt}
+                    />
+                    <div className="flex justify-end">
+                        <button
+                            onClick={handleRestart}
+                            disabled={isRestarting}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-600 dark:text-zinc-400 text-sm font-medium transition"
+                        >
+                            <RotateCcw size={13} className={isRestarting ? 'animate-spin' : ''} />
+                            {isRestarting ? 'Restarting...' : 'Restart'}
+                        </button>
                     </div>
-                    <h2 className="text-2xl font-bold">Automation Pipeline Running</h2>
-                    <p className="text-zinc-500 dark:text-zinc-400 max-w-md leading-relaxed">
-                        The Sentinel, Fortress, and Infrastructure agents are analyzing your full repository. This typically takes 30–90 seconds. This page will refresh automatically.
-                    </p>
-                    <div className="flex gap-6 mt-4">
-                        {[{ icon: Shield, label: 'Sentinel', color: 'text-indigo-500' }, { icon: TestTube2, label: 'Fortress', color: 'text-blue-500' }, { icon: Cloud, label: 'Infrastructure', color: 'text-amber-500' }].map(({ icon: Icon, label, color }) => (
-                            <div key={label} className="flex flex-col items-center gap-2">
-                                <div className="w-12 h-12 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center animate-pulse">
-                                    <Icon className={`w-5 h-5 ${color}`} />
-                                </div>
-                                <span className="text-xs font-medium text-zinc-500">{label}</span>
-                            </div>
-                        ))}
+                </div>
+            </div>
+        );
+    }
+
+    if (report?.status === 'failed') {
+        return (
+            <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
+                <NavBar id={id} navigate={navigate} />
+                <div className="max-w-2xl mx-auto px-6 md:px-10 py-12 space-y-6">
+                    <PipelineProgressPanel
+                        status={report.status}
+                        progress={report.progress}
+                        title="Automation Pipeline Failed"
+                        subtitle="The run stopped before completion. Review the error and try again."
+                        lastUpdatedAt={report.lastUpdatedAt}
+                    />
+                    <div className="rounded-xl border border-rose-200 dark:border-rose-800/50 bg-rose-50 dark:bg-rose-900/20 p-4 flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-rose-500 mt-0.5 shrink-0" />
+                        <p className="text-sm text-rose-700 dark:text-rose-300 flex-1">
+                            {report.error || 'Automation pipeline failed unexpectedly.'}
+                        </p>
+                    </div>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={handleRestart}
+                            disabled={isRestarting}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition"
+                        >
+                            <RotateCcw size={14} className={isRestarting ? 'animate-spin' : ''} />
+                            {isRestarting ? 'Restarting...' : 'Restart Pipeline'}
+                        </button>
+                        <button
+                            onClick={() => navigate(`/repo/${id}`)}
+                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-sm font-medium transition"
+                        >
+                            Back to Repository
+                        </button>
                     </div>
                 </div>
             </div>
@@ -390,10 +717,10 @@ export function AutomationReportPage() {
                     </div>
                     <h2 className="text-2xl font-bold">No automation report yet</h2>
                     <p className="text-zinc-500 dark:text-zinc-400 max-w-md leading-relaxed">
-                        The automation pipeline hasn't run for this repository yet. Go to <strong>Repository Settings</strong> and enable automation — the full pipeline (Sentinel review, Fortress test plan, Infrastructure prediction) will run automatically on the latest commit.
+                        The automation pipeline hasn't run for this repository yet. Go to <strong>Repository Settings</strong> and enable automation - the full pipeline (Sentinel review, Fortress test plan, Infrastructure prediction) will run automatically on the latest commit.
                     </p>
                     <button onClick={() => navigate(`/repo/${id}/settings`)} className="mt-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition">
-                        Go to Settings → Enable Automation
+                        Go to Settings -&gt; Enable Automation
                     </button>
                 </div>
             </div>
@@ -404,7 +731,7 @@ export function AutomationReportPage() {
     return (
         <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
             <style>{`
-                /* ─── CTA Button – lift + ripple-after animation ─── */
+                /* CTA button lift + ripple animation */
                 .cta-btn {
                   position: relative;
                   transition: transform 0.2s, box-shadow 0.2s;
@@ -467,7 +794,7 @@ export function AutomationReportPage() {
                 </div>
 
                 <div className="space-y-8">
-                    {/* ── SENTINEL REVIEW ────────────────────────────────── */}
+                    {/* SENTINEL REVIEW */}
                     <div className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-indigo-50/30 dark:bg-indigo-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -551,7 +878,7 @@ export function AutomationReportPage() {
                         </div>
                     </div>
 
-                    {/* ── FORTRESS TEST PLAN ─────────────────────────────── */}
+                    {/* FORTRESS TEST PLAN */}
                     <div className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-blue-50/30 dark:bg-blue-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -578,7 +905,7 @@ export function AutomationReportPage() {
                         </div>
                     </div>
 
-                    {/* ── INFRASTRUCTURE PREDICTION ──────────────────────── */}
+                    {/* INFRASTRUCTURE PREDICTION */}
                     <div className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-amber-50/30 dark:bg-amber-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">

@@ -104,14 +104,69 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         // Read the automationReport field from the repo document
         const automationReport = repo?.automationReport;
 
-        if (!automationReport || automationReport.status === "running") {
-            // Pipeline is still running or hasn't been triggered yet
+        if (!automationReport) {
             return ok({
-                status: automationReport?.status ?? "not_started",
+                status: "not_started",
                 sentinel: null,
                 fortress: null,
                 infrastructure: null,
-                lastUpdatedAt: automationReport?.startedAt ?? null,
+                error: null,
+                progress: null,
+                lastUpdatedAt: null,
+            });
+        }
+
+        if (automationReport.status === "running") {
+            // A run is stale if:
+            //   (a) no progress heartbeat in the last 8 minutes  (covers a single step hanging mid-call)
+            //   OR
+            //   (b) started more than 22 minutes ago regardless   (covers the full-pipeline cap)
+            const now = Date.now();
+            const lastUpdated  = new Date(automationReport.updatedAt  ?? automationReport.startedAt ?? 0).getTime();
+            const startedAt    = new Date(automationReport.startedAt  ?? 0).getTime();
+            const HEARTBEAT_MS = 4  * 60 * 1000;  // 4 min — heartbeat fires every 50 s so 4 min = safe buffer
+            const TOTAL_CAP_MS = 22 * 60 * 1000;  // 22 min — hard cap for the whole pipeline
+            const isStale = (now - lastUpdated) > HEARTBEAT_MS || (startedAt > 0 && (now - startedAt) > TOTAL_CAP_MS);
+
+            if (isStale) {
+                const ageMin = Math.round((now - lastUpdated) / 60000);
+                const msg = `Pipeline timed out — no progress for ${ageMin} minute${ageMin !== 1 ? "s" : ""}. Click Restart to try again.`;
+                logger.info({ msg: "Automation run is stale — marking as failed", repoId, ageMin });
+                try {
+                    const { UpdateCommand } = await import("@aws-sdk/lib-dynamodb");
+                    await docClient.send(new UpdateCommand({
+                        TableName: DYNAMO_TABLES.REPOSITORIES,
+                        Key: { repoId: repo.repoId ?? repo.id ?? repoId },
+                        UpdateExpression: "SET automationReport.#st = :failed, automationReport.#err = :err, automationReport.updatedAt = :ts",
+                        ExpressionAttributeNames: { "#st": "status", "#err": "error" },
+                        ExpressionAttributeValues: {
+                            ":failed": "failed",
+                            ":err": msg,
+                            ":ts": new Date().toISOString(),
+                        },
+                    }));
+                } catch (updateErr) {
+                    logger.warn({ msg: "Could not update stale run status", error: String(updateErr) });
+                }
+                return ok({
+                    status: "failed",
+                    sentinel: null,
+                    fortress: null,
+                    infrastructure: null,
+                    error: msg,
+                    progress: automationReport.progress ?? null,
+                    lastUpdatedAt: automationReport.updatedAt ?? automationReport.startedAt ?? null,
+                });
+            }
+
+            return ok({
+                status: "running",
+                sentinel: null,
+                fortress: null,
+                infrastructure: null,
+                error: null,
+                progress: automationReport.progress ?? null,
+                lastUpdatedAt: automationReport.updatedAt ?? automationReport.startedAt ?? null,
             });
         }
 
@@ -121,6 +176,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             sentinel: automationReport.sentinel ?? null,
             fortress: automationReport.fortress ?? null,
             infrastructure: automationReport.infrastructure ?? null,
+            error: automationReport.error ?? null,
+            progress: automationReport.progress ?? null,
             lastUpdatedAt: automationReport.completedAt ?? automationReport.updatedAt ?? new Date().toISOString(),
         });
 

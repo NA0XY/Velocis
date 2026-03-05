@@ -30,6 +30,177 @@ import axios from "axios";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
+type AutomationStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+interface AutomationPipelineStep {
+    key: "prepare" | "sentinel" | "fortress" | "infrastructure" | "projected";
+    label: string;
+    status: AutomationStepStatus;
+    detail?: string;
+    startedAt?: string;
+    completedAt?: string;
+    updatedAt: string;
+}
+
+interface AutomationPipelineProgress {
+    currentStepKey: AutomationPipelineStep["key"];
+    steps: AutomationPipelineStep[];
+}
+
+interface AutomationReportRecord {
+    status: "running" | "completed" | "failed";
+    startedAt?: string;
+    completedAt?: string;
+    error?: string;
+    sentinel?: unknown;
+    fortress?: unknown;
+    infrastructure?: unknown;
+    progress?: AutomationPipelineProgress;
+    updatedAt?: string;
+}
+
+const PIPELINE_STEP_ORDER: AutomationPipelineStep["key"][] = [
+    "prepare",
+    "sentinel",
+    "fortress",
+    "infrastructure",
+    "projected",
+];
+
+// Per-step timeout budgets. Bedrock calls on large repos can take several minutes.
+const STEP_TIMEOUT_MS: Record<AutomationPipelineStep["key"], number> = {
+    prepare:        2 * 60 * 1000,  //  2 min  — GitHub API fetch
+    sentinel:       5 * 60 * 1000,  //  5 min  — Bedrock standard review (was "deep" = 8 min)
+    fortress:       90 * 1000,       //  90 sec — DeepSeek Bedrock QA plan
+    infrastructure: 4 * 60 * 1000,  //  4 min  — Bedrock IaC generation
+    projected:      4 * 60 * 1000,  //  4 min  — Bedrock projected infra
+};
+// Hard cap for the entire pipeline run.
+const PIPELINE_GLOBAL_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
+
+/**
+ * Writes a "still alive" ping to DynamoDB every intervalMs while a long
+ * Bedrock call is in-progress.  Prevents the stale-run check in
+ * getAutomationReport from falsely marking a legitimate run as failed.
+ *
+ * Returns a stop function — ALWAYS call it when the step finishes.
+ */
+function startHeartbeat(
+    repoId: string,
+    startedAt: string,
+    getProgress: () => AutomationPipelineProgress,
+    intervalMs = 50_000   // every 50 s — well under the 4-min stale threshold
+): () => void {
+    let stopped = false;
+    const beat = async () => {
+        if (stopped) return;
+        try {
+            await persistAutomationReport(repoId, {
+                status: "running",
+                startedAt,
+                progress: getProgress(),
+            });
+            logger.info({ msg: "Automation heartbeat", repoId });
+        } catch (e) {
+            logger.warn({ msg: "Automation heartbeat failed (non-fatal)", repoId, error: String(e) });
+        }
+    };
+    const timer = setInterval(beat, intervalMs);
+    return () => { stopped = true; clearInterval(timer); };
+}
+
+/**
+ * Races a promise against a timeout. Throws with a clear message if time runs out.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+        promise.then(
+            (val) => { clearTimeout(timer); resolve(val); },
+            (err) => { clearTimeout(timer); reject(err); },
+        );
+    });
+}
+
+const PIPELINE_STEP_LABELS: Record<AutomationPipelineStep["key"], string> = {
+    prepare: "Repository preparation",
+    sentinel: "Sentinel deep review",
+    fortress: "Fortress QA plan",
+    infrastructure: "Infrastructure baseline",
+    projected: "Projected infrastructure",
+};
+
+function getStepStatus(
+    step: AutomationPipelineStep,
+    currentStepKey: AutomationPipelineStep["key"]
+): AutomationStepStatus {
+    if (step.status === "failed" || step.status === "skipped") {
+        return step.status;
+    }
+
+    const currentIndex = PIPELINE_STEP_ORDER.indexOf(currentStepKey);
+    const stepIndex = PIPELINE_STEP_ORDER.indexOf(step.key);
+
+    if (stepIndex < currentIndex) return "completed";
+    if (stepIndex === currentIndex) return step.status === "pending" ? "running" : step.status;
+    return step.status;
+}
+
+function buildInitialAutomationProgress(startedAt: string): AutomationPipelineProgress {
+    return {
+        currentStepKey: "prepare",
+        steps: PIPELINE_STEP_ORDER.map((key) => ({
+            key,
+            label: PIPELINE_STEP_LABELS[key],
+            status: key === "prepare" ? "running" : "pending",
+            startedAt: key === "prepare" ? startedAt : undefined,
+            updatedAt: startedAt,
+        })),
+    };
+}
+
+function updateProgressStep(
+    progress: AutomationPipelineProgress,
+    key: AutomationPipelineStep["key"],
+    updates: Partial<Pick<AutomationPipelineStep, "status" | "detail">>
+): AutomationPipelineProgress {
+    const now = new Date().toISOString();
+    const nextCurrentKey = updates.status === "running" ? key : progress.currentStepKey;
+
+    return {
+        currentStepKey: nextCurrentKey,
+        steps: progress.steps.map((step) => {
+            if (step.key !== key) {
+                return {
+                    ...step,
+                    status: getStepStatus(step, nextCurrentKey),
+                };
+            }
+
+            const nextStatus = updates.status ?? step.status;
+            const isRunning = nextStatus === "running";
+            const isDone = nextStatus === "completed" || nextStatus === "failed" || nextStatus === "skipped";
+
+            return {
+                ...step,
+                status: nextStatus,
+                detail: updates.detail ?? step.detail,
+                startedAt: step.startedAt ?? (isRunning ? now : step.startedAt),
+                completedAt: isDone ? now : step.completedAt,
+                updatedAt: now,
+            };
+        }),
+    };
+}
+
+async function persistAutomationReport(repoId: string, report: AutomationReportRecord): Promise<void> {
+    await dynamoClient.update({
+        tableName: DYNAMO_TABLES.REPOSITORIES,
+        key: { repoId },
+        updates: { automationReport: { ...report, updatedAt: new Date().toISOString() } },
+    });
+}
+
 // ── Auth helpers (same as other handlers) ────────────────────────────────────
 
 function parseCookieValue(cookieHeader: string | undefined | null, name: string): string | null {
@@ -245,25 +416,42 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         message: "Automation pipeline started. Sentinel, Fortress, and Infrastructure agents are now analyzing the full repository.",
     });
 
+    const startedAt = new Date().toISOString();
+    const initialProgress = buildInitialAutomationProgress(startedAt);
+
     // Mark the automation report as "running" first
     try {
-        await dynamoClient.update({
-            tableName: DYNAMO_TABLES.REPOSITORIES,
-            key: { repoId: numericRepoId },
-            updates: { automationReport: { status: "running", startedAt: new Date().toISOString() } },
+        await persistAutomationReport(numericRepoId, {
+            status: "running",
+            startedAt,
+            progress: initialProgress,
         });
     } catch { /* ignore */ }
 
-    // Run the pipeline asynchronously (fire-and-forget)
-    runAutomationPipeline({
-        repoId: numericRepoId,
-        repoFullName,
-        repoOwner,
-        repoName,
-        githubToken,
-        repo,
-    }).catch((err) => {
-        logger.error({ msg: "Automation pipeline failed", repoId, error: String(err) });
+    // Run the pipeline asynchronously (fire-and-forget), guarded by a global timeout.
+    withTimeout(
+        runAutomationPipeline({
+            repoId: numericRepoId,
+            repoFullName,
+            repoOwner,
+            repoName,
+            githubToken,
+            repo,
+        }),
+        PIPELINE_GLOBAL_TIMEOUT_MS,
+        "Automation pipeline",
+    ).catch(async (err) => {
+        const message = String(err);
+        logger.error({ msg: "Automation pipeline failed or timed out", repoId: numericRepoId, error: message });
+        try {
+            // Ensure the record is never left permanently stuck in "running"
+            await persistAutomationReport(numericRepoId, {
+                status: "failed",
+                startedAt,
+                error: message,
+                progress: initialProgress,
+            });
+        } catch { /* best-effort */ }
     });
 
     return responsePromise;
@@ -280,12 +468,49 @@ async function runAutomationPipeline(ctx: {
     repo: Record<string, any>;
 }): Promise<void> {
     const { repoId, repoFullName, repoOwner, repoName, githubToken, repo } = ctx;
+    const startedAt = new Date().toISOString();
+    let progress = buildInitialAutomationProgress(startedAt);
+
+    const persistRunningProgress = async (nextProgress: AutomationPipelineProgress): Promise<void> => {
+        progress = nextProgress;
+        try {
+            await persistAutomationReport(repoId, {
+                status: "running",
+                startedAt,
+                progress,
+            });
+        } catch {
+            // non-blocking progress persistence
+        }
+    };
+
+    const runStep = async (
+        key: AutomationPipelineStep["key"],
+        detail: string,
+        job: () => Promise<void>,
+        onError?: (errorMessage: string) => Promise<void>
+    ): Promise<boolean> => {
+        await persistRunningProgress(updateProgressStep(progress, key, { status: "running", detail }));
+        try {
+            await job();
+            await persistRunningProgress(updateProgressStep(progress, key, { status: "completed" }));
+            return true;
+        } catch (err) {
+            const message = String(err);
+            await persistRunningProgress(updateProgressStep(progress, key, { status: "failed", detail: message }));
+            if (onError) await onError(message);
+            return false;
+        }
+    };
 
     logger.info({ msg: "Automation pipeline starting", repoId, repoFullName });
 
     // Step 2: Get the full repo tree from GitHub
     let allSourceFiles: string[] = [];
-    try {
+    const fetchedTree = await runStep(
+        "prepare",
+        "Scanning repository and fetching source files",
+        async () => {
         const tree = await repoOps.fetchRepoTree({
             repoFullName,
             token: githubToken,
@@ -297,20 +522,41 @@ async function runAutomationPipeline(ctx: {
             .slice(0, 15); // Limit to 15 most relevant files to avoid Bedrock token limits
 
         logger.info({ msg: "Repo tree fetched", repoId, totalFiles: tree.length, reviewableFiles: allSourceFiles.length });
-    } catch (err) {
-        logger.error({ msg: "Failed to fetch repo tree", repoId, error: String(err) });
-        await saveAutomationReport(repo, { status: "failed", error: "Failed to fetch repository files from GitHub." });
+        }
+    );
+    if (!fetchedTree) {
+        logger.error({ msg: "Failed to fetch repo tree", repoId });
+        await saveAutomationReport(repo, {
+            status: "failed",
+            startedAt,
+            error: "Failed to fetch repository files from GitHub.",
+            progress,
+        });
         return;
     }
 
     if (allSourceFiles.length === 0) {
-        await saveAutomationReport(repo, { status: "completed", sentinel: null, fortress: null, infrastructure: null });
+        progress = updateProgressStep(progress, "sentinel", { status: "skipped", detail: "No reviewable source files found." });
+        progress = updateProgressStep(progress, "fortress", { status: "skipped", detail: "No reviewable source files found." });
+        progress = updateProgressStep(progress, "infrastructure", { status: "skipped", detail: "No reviewable source files found." });
+        progress = updateProgressStep(progress, "projected", { status: "skipped", detail: "No reviewable source files found." });
+        await saveAutomationReport(repo, {
+            status: "completed",
+            startedAt,
+            sentinel: null,
+            fortress: null,
+            infrastructure: null,
+            progress,
+        });
         return;
     }
 
     // Step 3: Fetch file contents
     let fileContents: Record<string, string> = {};
-    try {
+    const fetchedContents = await runStep(
+        "prepare",
+        "Downloading selected files for agent analysis",
+        async () => {
         const result = await repoOps.fetchFileContents({
             repoFullName,
             filePaths: allSourceFiles,
@@ -320,15 +566,29 @@ async function runAutomationPipeline(ctx: {
             Object.entries(result.files).map(([k, v]) => [k, v.content])
         );
         logger.info({ msg: "File contents fetched", repoId, fileCount: Object.keys(fileContents).length });
-    } catch (err) {
-        logger.error({ msg: "Failed to fetch file contents", repoId, error: String(err) });
-        await saveAutomationReport(repo, { status: "failed", error: "Failed to fetch file contents from GitHub." });
+        }
+    );
+    if (!fetchedContents) {
+        logger.error({ msg: "Failed to fetch file contents", repoId });
+        await saveAutomationReport(repo, {
+            status: "failed",
+            startedAt,
+            error: "Failed to fetch file contents from GitHub.",
+            progress,
+        });
         return;
     }
 
-    const combinedContent = Object.entries(fileContents)
+    // Cap at 50 000 chars (~12 500 tokens) so Bedrock doesn't queue or timeout
+    // on giant repos. Sentinel uses its own file-level chunking; Fortress and
+    // Infra get the same truncated view.
+    const MAX_COMBINED_CHARS = 50_000;
+    const rawCombined = Object.entries(fileContents)
         .map(([path, content]) => `// === FILE: ${path} ===\n${content}`)
         .join("\n\n");
+    const combinedContent = rawCombined.length > MAX_COMBINED_CHARS
+        ? rawCombined.slice(0, MAX_COMBINED_CHARS) + "\n\n// ... [truncated to fit model context limit]"
+        : rawCombined;
 
     // Step 4: Run all three agents
     let sentinelResult: any = null;
@@ -336,38 +596,59 @@ async function runAutomationPipeline(ctx: {
     let infraResult: IacGenerationResult | null = null;
     let projectedInfraResult: InfrastructurePredictionData | null = null;
 
-    // Phase A: Sentinel deep review
-    logger.info({ msg: "Phase A: Running Sentinel deep review", repoId });
+    // Start a heartbeat that writes to DynamoDB every 50 s so the stale-run
+    // check in getAutomationReport never false-fires during long Bedrock waits.
+    const stopHeartbeat = startHeartbeat(repoId, startedAt, () => progress);
+
     try {
-        const reviewResult = await analyzeLogic({
+    // Phase A: Sentinel review ("standard" depth = 4 096 tokens, ~2–3 min max)
+    logger.info({ msg: "Phase A: Sentinel starting", repoId, files: Object.keys(fileContents).length });
+    await persistRunningProgress(updateProgressStep(progress, "sentinel", {
+        status: "running",
+        detail: "Sent to Nova Pro — awaiting security & logic review (2–5 min)",
+    }));
+    try {
+        const reviewResult = await withTimeout(analyzeLogic({
             repoId,
             repoOwner,
             repoName,
             filePaths: Object.keys(fileContents),
             commitSha: "HEAD",
             accessToken: githubToken,
-            reviewDepth: "deep",
-        });
+            reviewDepth: "standard",   // was "deep" (8 000 tokens) — standard is 4 096, ~2× faster
+        }), STEP_TIMEOUT_MS.sentinel, "Sentinel");
         sentinelResult = (reviewResult as any)?.reviewResult ?? reviewResult;
-        logger.info({ msg: "Sentinel complete", repoId, overallRisk: sentinelResult?.overallRisk });
+        logger.info({ msg: "Phase A: Sentinel complete", repoId, overallRisk: sentinelResult?.overallRisk, findings: sentinelResult?.totalFindings });
+        await persistRunningProgress(updateProgressStep(progress, "sentinel", { status: "completed" }));
     } catch (err) {
-        logger.error({ msg: "Sentinel failed", repoId, error: String(err) });
+        logger.error({ msg: "Phase A: Sentinel failed", repoId, error: String(err) });
         sentinelResult = { status: "failed", error: String(err) };
+        await persistRunningProgress(updateProgressStep(progress, "sentinel", { status: "failed", detail: `Sentinel error: ${String(err)}` }));
     }
 
     // Phase B: Fortress QA Test Plan
-    logger.info({ msg: "Phase B: Running Fortress QA Strategist", repoId });
+    logger.info({ msg: "Phase B: Fortress starting", repoId, contentChars: combinedContent.length });
+    await persistRunningProgress(updateProgressStep(progress, "fortress", {
+        status: "running",
+        detail: "Sent to DeepSeek — generating QA scenarios (up to 90 s)",
+    }));
     try {
-        fortressResult = await generateQATestPlan(combinedContent);
-        logger.info({ msg: "Fortress complete", repoId, planLength: fortressResult?.length });
+        fortressResult = await withTimeout(generateQATestPlan(combinedContent), STEP_TIMEOUT_MS.fortress, "Fortress");
+        logger.info({ msg: "Phase B: Fortress complete", repoId, planChars: fortressResult?.length });
+        await persistRunningProgress(updateProgressStep(progress, "fortress", { status: "completed" }));
     } catch (err) {
-        logger.error({ msg: "Fortress failed", repoId, error: String(err) });
+        logger.error({ msg: "Phase B: Fortress failed", repoId, error: String(err) });
+        await persistRunningProgress(updateProgressStep(progress, "fortress", { status: "failed", detail: `Fortress error: ${String(err)}` }));
     }
 
     // Phase C: Infrastructure prediction
-    logger.info({ msg: "Phase C: Running Infrastructure Predictor", repoId });
+    logger.info({ msg: "Phase C: Infrastructure Predictor starting", repoId });
+    await persistRunningProgress(updateProgressStep(progress, "infrastructure", {
+        status: "running",
+        detail: "Sent to Nova Pro — estimating cloud resources & baseline costs",
+    }));
     try {
-        infraResult = await generateIac({
+        infraResult = await withTimeout(generateIac({
             repoId,
             repoOwner,
             repoName,
@@ -376,10 +657,12 @@ async function runAutomationPipeline(ctx: {
             accessToken: githubToken,
             region: "us-east-1",
             environment: "production",
-        });
-        logger.info({ msg: "Infrastructure Predictor complete", repoId });
+        }), STEP_TIMEOUT_MS.infrastructure, "Infrastructure");
+        logger.info({ msg: "Phase C: Infrastructure Predictor complete", repoId });
+        await persistRunningProgress(updateProgressStep(progress, "infrastructure", { status: "completed" }));
     } catch (err) {
-        logger.error({ msg: "Infrastructure Predictor failed", repoId, error: String(err) });
+        logger.error({ msg: "Phase C: Infrastructure Predictor failed", repoId, error: String(err) });
+        await persistRunningProgress(updateProgressStep(progress, "infrastructure", { status: "failed", detail: `Infrastructure error: ${String(err)}` }));
     }
 
     // Phase D: Projected infrastructure if Sentinel suggestions are applied
@@ -390,10 +673,19 @@ async function runAutomationPipeline(ctx: {
 
     if (hasSentinelSuggestions || hasSentinelFindings) {
         logger.info({ msg: "Phase D: Running projected Infrastructure plan (after Sentinel changes)", repoId });
+        await persistRunningProgress(updateProgressStep(progress, "projected", {
+            status: "running",
+            detail: "Projecting infrastructure after Sentinel fixes are applied",
+        }));
         try {
             const projectedPrompt = buildProjectedInfraPrompt(combinedContent, sentinelResult);
-            projectedInfraResult = await predictInfrastructureFromCodeContent(projectedPrompt);
+            projectedInfraResult = await withTimeout(
+                predictInfrastructureFromCodeContent(projectedPrompt),
+                STEP_TIMEOUT_MS.projected,
+                "Projected Infrastructure",
+            );
             logger.info({ msg: "Projected Infrastructure plan complete", repoId });
+            await persistRunningProgress(updateProgressStep(progress, "projected", { status: "completed" }));
         } catch (err) {
             logger.warn({
                 msg: "Projected Infrastructure plan failed; saving baseline plan only",
@@ -401,7 +693,18 @@ async function runAutomationPipeline(ctx: {
                 error: String(err),
             });
             projectedInfraResult = null;
+            await persistRunningProgress(updateProgressStep(progress, "projected", { status: "failed", detail: String(err) }));
         }
+    } else {
+        await persistRunningProgress(updateProgressStep(progress, "projected", {
+            status: "skipped",
+            detail: "No Sentinel findings available to project post-change infrastructure",
+        }));
+    }
+
+    } finally {
+        // Always stop the heartbeat, whether phases succeeded or threw
+        stopHeartbeat();
     }
 
     // Step 5: Save full report
@@ -428,7 +731,9 @@ async function runAutomationPipeline(ctx: {
 
     const report = {
         status: "completed",
+        startedAt,
         completedAt: new Date().toISOString(),
+        progress,
         sentinel: sentinelResult ? {
             overallRisk: sentinelResult.overallRisk ?? "unknown",
             riskScore: sentinelResult.criticalFindings != null
@@ -466,12 +771,7 @@ async function runAutomationPipeline(ctx: {
 async function saveAutomationReport(repo: Record<string, any>, report: Record<string, any>): Promise<void> {
     try {
         const repoId = repo.repoId ?? repo.id ?? repo.repoSlug;
-
-        await dynamoClient.update({
-            tableName: DYNAMO_TABLES.REPOSITORIES,
-            key: { repoId },
-            updates: { automationReport: { ...report, updatedAt: new Date().toISOString() } },
-        });
+        await persistAutomationReport(String(repoId), report as AutomationReportRecord);
     } catch (err) {
         logger.error({ msg: "Failed to save automation report", error: String(err) });
     }

@@ -201,7 +201,11 @@ const INFRA_RELEVANT_EXTENSIONS = new Set([
 // AWS CLIENTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const bedrockClient = new BedrockRuntimeClient({ region: config.AWS_REGION });
+// 120-second hard timeout on the HTTP socket — prevents IaC Bedrock calls from hanging
+const bedrockClient = new BedrockRuntimeClient({
+  region: config.AWS_REGION,
+  requestHandler: { requestTimeout: 120_000 } as any,
+});
 
 /**
  * AWS Pricing API is only available in us-east-1 — always use that region
@@ -628,7 +632,14 @@ async function invokeClaudeForIac(
       body: JSON.stringify(requestBody),
     });
 
-    const response = await bedrockClient.send(command);
+    const abort = new AbortController();
+    const abortTimer = setTimeout(() => abort.abort(), 115_000);
+    let response;
+    try {
+      response = await bedrockClient.send(command, { abortSignal: abort.signal });
+    } finally {
+      clearTimeout(abortTimer);
+    }
     const latencyMs = Date.now() - t0;
     const parsed = JSON.parse(new TextDecoder().decode(response.body));
     const responseText: string = parsed.output?.message?.content?.[0]?.text ?? "";
