@@ -8,6 +8,7 @@ import {
   BookOpen, Copy, Check, FileText,
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
+import { useTheme } from '../../lib/theme';
 
 // ─── Live Pipeline Workflow ───────────────────────────────────────────────────
 function LivePipelineWorkflow({ isDarkMode }: { isDarkMode: boolean }) {
@@ -95,7 +96,7 @@ function LivePipelineWorkflow({ isDarkMode }: { isDarkMode: boolean }) {
 export function PipelinePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, setIsDarkMode } = useTheme();
   const themeClass = isDarkMode ? 'dark' : '';
 
   const repoName = id ?? 'Unknown';

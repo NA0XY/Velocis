@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Download, RefreshCw, Shield, Lock, Zap, RotateCcw, DollarSign, TrendingDown, Server, Database, Activity, CloudCog, Home, Folder, Sun, Moon, Copy, Maximize2, Terminal } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
+import { useTheme } from '../../lib/theme';
 import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData } from '../../lib/api';
 
 const INFRA_TF_PLACEHOLDER = '# No analysis yet.\n# Click "Analyse Infrastructure" in the toolbar to generate\n# real Terraform IaC from your repository code.';
@@ -13,11 +14,11 @@ const INFRA_TF_PLACEHOLDER = '# No analysis yet.\n# Click "Analyse Infrastructur
 export function InfrastructurePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { isDarkMode, setIsDarkMode } = useTheme();
   const [environment, setEnvironment] = useState<'production' | 'staging' | 'preview'>('production');
   // Cost data is derived entirely from infraData (AI prediction) — no initial mock values
   const [tfCode, setTfCode] = useState<string>(INFRA_TF_PLACEHOLDER);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
   const [isWhyInfraExpanded, setIsWhyInfraExpanded] = useState(false);
 
   // ── IaC Predictor State ──────────────────────────────────────────────

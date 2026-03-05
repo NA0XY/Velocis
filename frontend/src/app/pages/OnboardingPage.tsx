@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, CheckCircle, Lock, Eye, Shield, GitBranch, Loader2, Home, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../lib/auth';
+import { useTheme } from '../../lib/theme';
 import { getSessionRepos, installRepo as apiInstallRepo, getInstallStatus, getDashboard } from '../../lib/api';
 
 // Language → colour mapping (mirrors the backend constant)
@@ -37,7 +38,7 @@ interface Repo {
 export function OnboardingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, setIsDarkMode } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [selectedRepoGithubId, setSelectedRepoGithubId] = useState<number | null>(null);

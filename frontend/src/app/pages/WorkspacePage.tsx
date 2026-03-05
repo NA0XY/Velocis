@@ -6,6 +6,7 @@ import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle,
 import { useNavigate, useParams } from 'react-router';
 import Editor from '@monaco-editor/react';
 import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode } from '../../lib/api';
+import { useTheme } from '../../lib/theme';
 import { translateText } from '../../lib/translate';
 
 const INITIAL_FILE = '/src/auth.controller.ts';
@@ -166,7 +167,7 @@ export function WorkspacePage() {
   const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
 
   // Dark mode state
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, setIsDarkMode } = useTheme();
 
   // Apply dark class to an enclosing wrapper
   const themeClass = isDarkMode ? 'dark' : '';

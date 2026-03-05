@@ -18,7 +18,7 @@ import {
     ConverseCommand,
     type ConverseCommandInput,
 } from "@aws-sdk/client-bedrock-runtime";
-import { ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
 import { logger } from "../../utils/logger";
 import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
@@ -297,6 +297,37 @@ async function persistAutomationReport(repoId: string, report: AutomationReportR
         key: { repoId },
         updates: { automationReport: { ...report, updatedAt: new Date().toISOString() } },
     });
+}
+
+/**
+ * Returns true if automation is still enabled for this repo.
+ * Uses GetCommand (direct key lookup) on the numericRepoId — the same key
+ * that persistAutomationReport writes to. This avoids scan pagination issues
+ * and the "two records" problem where isAutomated lives on a different record
+ * than the automationReport.
+ */
+async function checkIsAutomated(repoId: string, startedAt: string): Promise<boolean> {
+    try {
+        const docClient = getDocClient();
+        // Direct hash-key lookup — O(1), no pagination, reliable
+        const result = await docClient.send(new GetCommand({
+            TableName: DYNAMO_TABLES.REPOSITORIES,
+            Key: { repoId },
+        }));
+        const item = result.Item;
+        if (!item) return true; // Record not found — don't abort
+
+        // Primary signal: automationCancelledAt written by updateRepoSettings
+        // when the user pressed "Disable Automation"
+        if (item.automationCancelledAt && item.automationCancelledAt >= startedAt) return false;
+
+        // Secondary signal: isAutomated explicitly set to false on this record
+        if (item.isAutomated === false) return false;
+
+        return true;
+    } catch {
+        return true; // On error, don't abort
+    }
 }
 
 // ── Auth helpers (same as other handlers) ────────────────────────────────────
@@ -603,6 +634,22 @@ async function runAutomationPipeline(ctx: {
 
     logger.info({ msg: "Automation pipeline starting", repoId, repoFullName });
 
+    // Helper: abort if user disabled automation after this run started
+    const abortIfDisabled = async (phase: string): Promise<boolean> => {
+        const enabled = await checkIsAutomated(repoId, startedAt);
+        if (!enabled) {
+            logger.info({ msg: `Automation cancelled mid-run at ${phase}`, repoId });
+            await persistAutomationReport(repoId, {
+                status: "failed",
+                startedAt,
+                completedAt: new Date().toISOString(),
+                error: "Automation was disabled by the user.",
+                progress,
+            });
+        }
+        return !enabled;
+    };
+
     // Step 2: Get the full repo tree from GitHub
     let allSourceFiles: string[] = [];
     const fetchedTree = await runStep(
@@ -699,6 +746,9 @@ async function runAutomationPipeline(ctx: {
     const stopHeartbeat = startHeartbeat(repoId, startedAt, () => progress);
 
     try {
+    // Pre-phase check: was automation disabled before we even started the agents?
+    if (await abortIfDisabled("pre-agents")) { stopHeartbeat(); return; }
+
     // Phase A: Sentinel — DeepSeek V3 via ConverseCommand (same model as Fortress)
     logger.info({ msg: "Phase A: Sentinel starting", repoId, contentChars: combinedContent.length });
     await persistRunningProgress(updateProgressStep(progress, "sentinel", {
@@ -719,6 +769,9 @@ async function runAutomationPipeline(ctx: {
         await persistRunningProgress(updateProgressStep(progress, "sentinel", { status: "failed", detail: `Sentinel error: ${String(err)}` }));
     }
 
+    // Check between phases
+    if (await abortIfDisabled("post-sentinel")) { stopHeartbeat(); return; }
+
     // Phase B: Fortress QA Test Plan
     logger.info({ msg: "Phase B: Fortress starting", repoId, contentChars: combinedContent.length });
     await persistRunningProgress(updateProgressStep(progress, "fortress", {
@@ -733,6 +786,8 @@ async function runAutomationPipeline(ctx: {
         logger.error({ msg: "Phase B: Fortress failed", repoId, error: String(err) });
         await persistRunningProgress(updateProgressStep(progress, "fortress", { status: "failed", detail: `Fortress error: ${String(err)}` }));
     }
+
+    if (await abortIfDisabled("post-fortress")) { stopHeartbeat(); return; }
 
     // Phase C: Infrastructure prediction
     logger.info({ msg: "Phase C: Infrastructure Predictor starting", repoId });
@@ -757,6 +812,12 @@ async function runAutomationPipeline(ctx: {
         logger.error({ msg: "Phase C: Infrastructure Predictor failed", repoId, error: String(err) });
         await persistRunningProgress(updateProgressStep(progress, "infrastructure", { status: "failed", detail: `Infrastructure error: ${String(err)}` }));
     }
+
+    if (await abortIfDisabled("post-infrastructure")) { stopHeartbeat(); return; }
+
+    // Final check before saving completed report — covers the case where the
+    // user disabled automation while the last phase was running.
+    if (await abortIfDisabled("pre-save")) { stopHeartbeat(); return; }
 
     // Phase D: Projected infrastructure if Sentinel suggestions are applied
     const hasSentinelSuggestions =

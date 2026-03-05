@@ -10,6 +10,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import dagre from 'dagre';
 import { motion, AnimatePresence } from 'motion/react';
+import { useTheme } from '../../lib/theme';
 import {
   ChevronLeft, ChevronRight, Search, Shield, TestTube2, Eye, EyeOff,
   RefreshCw, Maximize2, AlertCircle, CheckCircle, AlertTriangle,
@@ -664,9 +665,7 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
 function CortexPageContent() {
   const { id: repoId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-
-  // Theme
-  const [isDark, setIsDark] = useState(true);
+  const { isDarkMode: isDark, setIsDarkMode: setIsDark } = useTheme();
   const bg        = isDark ? '#080a0f'             : '#eef0f4';
   const panelBg   = isDark ? 'rgba(10,12,18,0.97)' : 'rgba(255,255,255,0.97)';
   const border    = isDark ? '#1a1f2e'             : '#e5e7eb';

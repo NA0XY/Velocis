@@ -7,6 +7,7 @@ import {
   Sun, Moon, Loader2
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
+import { useTheme } from '../../lib/theme';
 import type { RepoDetail, ActivityEvent } from '../../lib/api';
 import { getToken } from '../../lib/api';
 
@@ -232,7 +233,7 @@ export function RepositoryPage() {
 
   const [error, setError] = useState<string | null>(null);
 
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, setIsDarkMode } = useTheme();
   const themeClass = isDarkMode ? 'dark' : '';
 
   // Fetch repo details and activity from the backend

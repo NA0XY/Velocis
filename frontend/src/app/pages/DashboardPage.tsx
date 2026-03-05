@@ -4,6 +4,7 @@ import { Search, Home, Star, Sun, Moon, Loader2, LogOut, MoreVertical, Trash2 } 
 import type { DashboardResponse, ActivityEvent, SystemHealth } from '../../lib/api';
 import { deleteRepo } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
+import { useTheme } from '../../lib/theme';
 import LoadingAnimation from '../components/LoadingAnimation';
 
 // Default initial values for data while loading or on failure
@@ -125,7 +126,7 @@ function RepoCardMenu({ repoId, onDeleted }: { repoId: string; onDeleted?: (repo
 
 export function DashboardPage() {
   const [activityTab, setActivityTab] = useState("all");
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDarkMode, setIsDarkMode } = useTheme();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const navigate = useNavigate();
   const { user, logout } = useAuth();
