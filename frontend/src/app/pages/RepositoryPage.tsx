@@ -236,10 +236,13 @@ export function RepositoryPage() {
   const themeClass = isDarkMode ? 'dark' : '';
 
   // Fetch repo details and activity from the backend
+  // Polls every 30 s so commit history, risk scores, and pipeline state
+  // reflect any push events processed by the backend since page load.
   useEffect(() => {
     let cancelled = false;
+    let isFirstLoad = true;
     async function load() {
-      setIsLoading(true);
+      if (isFirstLoad) setIsLoading(true);
       setError(null);
       try {
         // Fetch repo detail
@@ -290,11 +293,21 @@ export function RepositoryPage() {
         console.error('Error loading repo:', err);
         if (!cancelled) setError(err.message ?? 'Failed to load repository');
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled && isFirstLoad) setIsLoading(false);
+        isFirstLoad = false;
       }
     }
     load();
-    return () => { cancelled = true; };
+
+    // Poll every 30 seconds so the page reflects new pushes processed by the backend
+    const pollInterval = setInterval(() => {
+      if (!cancelled) load();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollInterval);
+    };
   }, [id, navigate]);
 
 

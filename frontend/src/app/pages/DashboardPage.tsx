@@ -137,9 +137,12 @@ export function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+    let isFirstLoad = true;
+
     async function loadDashboard() {
       try {
-        setIsLoading(true);
+        if (isFirstLoad) setIsLoading(true);
         const res = await fetch(`${BACKEND_URL}/api/dashboard`, {
           credentials: 'include'
         });
@@ -154,23 +157,35 @@ export function DashboardPage() {
         }
 
         const data: DashboardResponse = await res.json();
-        setDashboardData(data);
-        setActivityData(data.activity_feed || []);
+        if (!cancelled) {
+          setDashboardData(data);
+          setActivityData(data.activity_feed || []);
 
-        const healthData = data.system || MOCK_HEALTH;
-        setSystemHealth({
-          ...healthData,
-          agents: (healthData as any).agents || []
-        });
-
+          const healthData = data.system || MOCK_HEALTH;
+          setSystemHealth({
+            ...healthData,
+            agents: (healthData as any).agents || []
+          });
+        }
       } catch (err) {
         console.error('Error fetching dashboard:', err);
       } finally {
-        setIsLoading(false);
+        if (!cancelled && isFirstLoad) setIsLoading(false);
+        isFirstLoad = false;
       }
     }
 
     loadDashboard();
+
+    // Poll every 30 seconds so dashboard repo cards and activity feed reflect new pushes
+    const pollInterval = setInterval(() => {
+      if (!cancelled) loadDashboard();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollInterval);
+    };
   }, [navigate]);
 
   const themeClass = isDarkMode ? 'dark' : '';
