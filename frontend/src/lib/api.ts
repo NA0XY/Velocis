@@ -516,8 +516,12 @@ export const getWorkspaceFiles = (
   repoId: string,
   path = '/',
   recursive = false,
+  branch?: string,
 ): Promise<{ path: string; files: WorkspaceFile[] }> =>
-  request(`/api/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`);
+  request(`/api/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}${branch ? `&ref=${encodeURIComponent(branch)}` : ''}`);
+
+export const getRepoBranches = (repoId: string): Promise<{ branches: string[] }> =>
+  request(`/api/repos/${repoId}/workspace/branches`);
 
 export const getFileContent = (
   repoId: string,

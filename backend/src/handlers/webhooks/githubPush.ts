@@ -22,7 +22,8 @@ import { validatePayload } from "../../middlewares/validatePayload";
 import { githubPushSchema } from "../../models/schemas/githubSchemas";
 import { analyzeLogic } from "../../functions/sentinel/analyzeLogic";
 import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress";
-import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
+import { buildCortexGraph, CortexGraph } from "../../functions/cortex/graphBuilder";
+import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
 import { generateIac } from "../../functions/predictor/generateIac";
 import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
@@ -562,7 +563,7 @@ async function runAgentPipeline(ctx: {
         )
       : Promise.resolve({ status: "skipped", reason: "No source files changed" }),
 
-    // CORTEX: Rebuild the dependency graph for the 3D canvas
+    // CORTEX: Rebuild the dependency graph for the 3D canvas and sync service rows
     // Force a full rebuild when files are deleted so removed nodes are purged
     withTimeout(
       buildCortexGraph({
@@ -571,6 +572,10 @@ async function runAgentPipeline(ctx: {
         repoName: repoFullName.split("/")[1] ?? "",
         accessToken: installationToken,
         forceRebuild: true,
+      }).then(async (graph: CortexGraph) => {
+        // Sync the flattened service rows so getCortexServices() sees fresh data
+        await syncCortexServices(repoId, graph);
+        return graph;
       }),
       AGENT_TIMEOUT_MS,
       "Cortex"
