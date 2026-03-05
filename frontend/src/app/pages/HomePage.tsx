@@ -109,6 +109,40 @@ const LANDING_CSS = `
     font-size: clamp(8px, 1vw, 14px);
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
 }
+
+/* ── CTA Button – lift + ripple-after animation ── */
+.cta-btn {
+  position: relative;
+  transition: transform 0.2s, box-shadow 0.2s;
+  overflow: visible;
+}
+.cta-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+.cta-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+.cta-btn:active {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.2);
+}
+.cta-btn::after {
+  content: '';
+  display: inline-block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  position: absolute;
+  top: 0; left: 0;
+  z-index: -1;
+  background-color: var(--cta-primary, #6366f1);
+  transition: transform 0.4s, opacity 0.4s;
+}
+.cta-btn:hover::after {
+  transform: scaleX(1.4) scaleY(1.6);
+  opacity: 0;
+}
+.cta-btn--blue::after  { background-color: var(--cta-primary, #6366f1); }
+.cta-btn--violet::after { background-color: var(--cta-primary, #6366f1); }
 `;
 
 // ─────────────────────────────────────────────
@@ -262,7 +296,7 @@ function Hero() {
                 </p>
 
                 <div className="hero-anim flex flex-col sm:flex-row gap-4 mb-24">
-                    <button onClick={() => navigate('/auth')} className="flex items-center gap-2 bg-dark text-textInverse px-8 py-4 rounded-button font-medium hover:bg-dark/80 transition-opacity duration-300">
+                    <button onClick={() => navigate('/auth')} className="cta-btn cta-btn--blue flex items-center gap-2 px-8 py-4 rounded-button font-medium" style={{ backgroundColor: 'var(--cta-primary, #1c1c1c)', color: 'var(--cta-text, #fff)' }}>
                         <Github size={20} /> Connect Repository
                     </button>
                     <button className="flex items-center gap-2 bg-transparent text-textMain border border-borderSubtle px-8 py-4 rounded-button font-medium hover:bg-surface transition-colors duration-300">
@@ -1249,7 +1283,7 @@ function CTA() {
                 </p>
                 <TextGenerate delay={0.8}>
                     <div className="flex flex-col sm:flex-row gap-4">
-                        <button onClick={() => navigate('/auth')} className="bg-primary text-dark px-10 py-5 rounded-button font-bold text-lg hover:brightness-110 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20 transition-all cursor-pointer">Connect Repository Free</button>
+                        <button onClick={() => navigate('/auth')} className="cta-btn cta-btn--blue px-10 py-5 rounded-button font-bold text-lg cursor-pointer" style={{ backgroundColor: 'var(--cta-primary, #6366f1)', color: 'var(--cta-text, #fff)' }}>Connect Repository Free</button>
                         <button className="bg-transparent text-textInverse border border-borderInv px-10 py-5 rounded-button font-bold text-lg hover:bg-white/5 hover:scale-105 active:scale-95 transition-all cursor-pointer">Read the Docs</button>
                     </div>
                 </TextGenerate>
