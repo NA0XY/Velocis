@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle, Lightbulb, Info, Home, Folder, Sparkles, Zap, CheckCircle2, Activity, Search, History, Clock, MessageSquare, Plus } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import Editor from '@monaco-editor/react';
-import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode } from '../../lib/api';
+import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode, getRepo } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
 import { translateText } from '../../lib/translate';
 import lightLogoImg from '../../../LightLogo.png';
@@ -167,6 +167,7 @@ export function WorkspacePage() {
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
+  const [repoName, setRepoName] = useState<string>('');
 
   // Dark mode state
   const { isDarkMode, setIsDarkMode } = useTheme();
@@ -174,11 +175,10 @@ export function WorkspacePage() {
   // Apply dark class to an enclosing wrapper
   const themeClass = isDarkMode ? 'dark' : '';
 
-  const repoName = id ?? 'Unknown';
-
   // ─ Fetch initial data on mount ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
+    getRepo(id).then(r => setRepoName(r.name)).catch(() => {});
 
     // Immediately restore cached messages so history is visible before API returns
     try {

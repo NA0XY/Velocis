@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { ChevronDown, Download, RefreshCw, Shield, Lock, Zap, RotateCcw, DollarSign, TrendingDown, Server, Database, Activity, CloudCog, Home, Folder, Sun, Moon, Copy, Maximize2, Terminal } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
-import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData } from '../../lib/api';
+import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData, getRepo } from '../../lib/api';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -33,11 +33,12 @@ export function InfrastructurePage() {
   const codeRef = useRef<HTMLDivElement>(null);
 
   const themeClass = isDarkMode ? 'dark' : '';
-  const repoName = id ?? 'Unknown';
+  const [repoName, setRepoName] = useState<string>('');
 
   // ── Restore cached infra data on mount ──────────────────────────────────
   useEffect(() => {
     if (!id) return;
+    getRepo(id).then(r => setRepoName(r.name)).catch(() => {});
     try {
       const cached = localStorage.getItem(`velocis:infra:${id}`);
       if (cached) {

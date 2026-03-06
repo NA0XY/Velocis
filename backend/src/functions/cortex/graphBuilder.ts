@@ -222,13 +222,40 @@ function extractImportsFallback(sourceCode: string, currentFilePath: string): st
       }
     }
   } else {
-    const re = /(?:import\s+.*?\s+from\s+['"](.+?)['"]|require\s*\(\s*['"](.+?)['"]\s*\))/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(sourceCode)) !== null) {
-      const p = m[1] ?? m[2];
-      if (p?.startsWith(".")) {
-        const resolved = path.normalize(path.join(path.dirname(currentFilePath), p)).replace(/\\/g, "/");
-        imports.push(resolved);
+    // Comprehensive JS/TS/CSS/HTML import patterns:
+    // 1. ES module static:   import ... from '...'
+    // 2. ES module side-effect: import '...'
+    // 3. CJS require:        require('...')
+    // 4. Dynamic import:     import('...')
+    // 5. Re-export:          export ... from '...'
+    // 6. Export all:         export * from '...'
+    // 7. CSS @import:        @import '...' or @import url('...')
+    // 8. HTML src/href:      <script src="..."> / <link href="...">
+    const patterns: RegExp[] = [
+      // Static ES import / re-export (handles multiline with \n inside braces)
+      /(?:import|export)\s+(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+      // Side-effect-only import: import '...' or import "..."
+      /^\s*import\s+['"]([^'"]+)['"];?/gm,
+      // CJS require / dynamic import
+      /(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+      // CSS @import
+      /@import\s+(?:url\(\s*)?['"]([^'"]+)['"]/g,
+      // HTML <script src> <link href> <img src> — basic
+      /(?:src|href)\s*=\s*['"]([^'"]+\.[a-z]{1,5})['"][^>]*>/g,
+    ];
+    const seen = new Set<string>();
+    for (const re of patterns) {
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sourceCode)) !== null) {
+        const raw = m[1];
+        if (!raw || seen.has(raw)) continue;
+        seen.add(raw);
+        if (raw.startsWith(".")) {
+          // Relative — resolve to root-relative path
+          const resolved = path.normalize(path.join(path.dirname(currentFilePath), raw)).replace(/\\/g, "/");
+          imports.push(resolved);
+        }
+        // Non-relative (npm packages, bare URLs) intentionally skipped
       }
     }
   }
@@ -244,12 +271,12 @@ function extractFunctionsFallback(source: string, filePath = ""): string[] {
   const patterns = isPython
     ? [/^def\s+(\w+)\s*\(/gm, /^async\s+def\s+(\w+)\s*\(/gm, /^class\s+(\w+)[:(]/gm]
     : [
-        /export\s+(?:async\s+)?function\s+(\w+)/g,
-        /export\s+const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/g,
-        /export\s+class\s+(\w+)/g,
-        /^(?:async\s+)?function\s+(\w+)/gm,
-        /^const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/gm,
-      ];
+      /export\s+(?:async\s+)?function\s+(\w+)/g,
+      /export\s+const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/g,
+      /export\s+class\s+(\w+)/g,
+      /^(?:async\s+)?function\s+(\w+)/gm,
+      /^const\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>/gm,
+    ];
   for (const re of patterns) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(source)) !== null) {
@@ -280,7 +307,11 @@ async function analyzeFileWithAI(
   filePath: string,
   sourceCode: string,
 ): Promise<FileAnalysis> {
-  // Truncate to ~3 KB to keep token cost very low
+  // Regex over the FULL source — reliable, zero cost, handles any file size
+  const regexImports = extractImportsFallback(sourceCode, filePath);
+  const regexFunctions = extractFunctionsFallback(sourceCode, filePath);
+
+  // Truncate to ~3 KB for the AI call (kept small to control latency/cost)
   const snippet = sourceCode.slice(0, 3000);
   const ext = path.extname(filePath);
 
@@ -308,20 +339,25 @@ async function analyzeFileWithAI(
     const raw = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
     const parsed = JSON.parse(raw) as FileAnalysis;
 
-    // Normalise: ensure all fields are the right types
+    // Merge AI results with regex results: regex covers the full source;
+    // AI may add semantic entries from the visible snippet.
+    const aiImports = Array.isArray(parsed.imports) ? parsed.imports : [];
+    const aiFunctions = Array.isArray(parsed.functions) ? parsed.functions : [];
+
     return {
-      functions: Array.isArray(parsed.functions) ? parsed.functions.slice(0, 30) : extractFunctionsFallback(sourceCode, filePath),
-      imports:   Array.isArray(parsed.imports)   ? parsed.imports               : extractImportsFallback(sourceCode, filePath),
-      summary:   typeof parsed.summary === "string" && parsed.summary.length > 3
-                   ? parsed.summary
-                   : "No summary available.",
+      // Union: unique entries from both sources, regex first (full coverage)
+      imports: [...new Set([...regexImports, ...aiImports])],
+      functions: [...new Set([...regexFunctions, ...aiFunctions])].slice(0, 30),
+      summary: typeof parsed.summary === "string" && parsed.summary.length > 3
+        ? parsed.summary
+        : "No summary available.",
     };
   } catch (err) {
     logger.warn({ filePath, err }, "AI file analysis failed — falling back to regex");
     return {
-      functions: extractFunctionsFallback(sourceCode, filePath),
-      imports:   extractImportsFallback(sourceCode, filePath),
-      summary:   "Summary unavailable.",
+      functions: regexFunctions,
+      imports: regexImports,
+      summary: "Summary unavailable.",
     };
   }
 }
@@ -461,12 +497,12 @@ async function buildNodes(
 
             if (enableAiSummaries) {
               const analysis = await analyzeFileWithAI(file.path, source);
-              functionNames   = analysis.functions;
-              aiSummary       = analysis.summary;
+              functionNames = analysis.functions;
+              aiSummary = analysis.summary;
               resolvedImports = resolveRawImportPaths(analysis.imports, file.path);
             } else {
               resolvedImports = extractImportsFallback(source, file.path);
-              functionNames   = extractFunctionsFallback(source, file.path);
+              functionNames = extractFunctionsFallback(source, file.path);
             }
           } catch (err) {
             logger.warn({ filePath: file.path, err }, "Could not fetch/analyse file");
@@ -496,7 +532,7 @@ async function buildNodes(
 
         return {
           node,
-          importEntry:   [nodeId, resolvedImports.map((p) => hashPath(p))] as [string, string[]],
+          importEntry: [nodeId, resolvedImports.map((p) => hashPath(p))] as [string, string[]],
           rawImportEntry: [nodeId, resolvedImports] as [string, string[]],
         };
       })
@@ -509,8 +545,8 @@ async function buildNodes(
     }
   }
 
-  for (const [k, v] of importMapEntries)  importMap.set(k, v);
-  for (const [k, v] of rawImportEntries)  rawImportPaths.set(k, v);
+  for (const [k, v] of importMapEntries) importMap.set(k, v);
+  for (const [k, v] of rawImportEntries) rawImportPaths.set(k, v);
 
   const nodes = results;
   logger.info({ repoId, nodeCount: nodes.length }, "Cortex: Nodes built");

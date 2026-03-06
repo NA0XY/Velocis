@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { getRepo } from '../../lib/api';
 import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw, Check, X } from 'lucide-react';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
@@ -582,6 +583,7 @@ export function AutomationReportPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isRestarting, setIsRestarting] = useState(false);
+    const [repoName, setRepoName] = useState<string>('');
 
     const fetchReport = useCallback(async () => {
         try {
@@ -611,7 +613,8 @@ export function AutomationReportPage() {
 
     useEffect(() => {
         fetchReport();
-    }, [fetchReport]);
+        if (id) getRepo(id).then(r => setRepoName(r.name)).catch(() => {});
+    }, [fetchReport, id]);
 
     const handleRestart = useCallback(async () => {
         if (!id || isRestarting) return;
@@ -656,7 +659,7 @@ export function AutomationReportPage() {
     if (isLoading) {
         return (
             <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
-                <NavBar id={id} navigate={navigate} />
+                <NavBar id={id} navigate={navigate} repoName={repoName} />
                 <div className="flex items-center justify-center py-32">
                     <div className="w-6 h-6 rounded-full border-2 border-zinc-200 dark:border-zinc-700 border-t-indigo-500 animate-spin" />
                 </div>
@@ -679,7 +682,7 @@ export function AutomationReportPage() {
     if (report?.status === 'running') {
         return (
             <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
-                <NavBar id={id} navigate={navigate} />
+                <NavBar id={id} navigate={navigate} repoName={repoName} />
                 <div className="w-full px-6 md:px-10 py-12 space-y-6">
                     <PipelineProgressPanel
                         status={report.status}
@@ -706,7 +709,7 @@ export function AutomationReportPage() {
     if (report?.status === 'failed') {
         return (
             <div className="w-full min-h-screen bg-[#f6f7fb] dark:bg-[#0A0A0E] text-zinc-900 dark:text-slate-100 font-['JetBrains_Mono',_monospace]">
-                <NavBar id={id} navigate={navigate} />
+                <NavBar id={id} navigate={navigate} repoName={repoName} />
                 <div className="w-full px-6 md:px-10 py-12 space-y-6">
                     <PipelineProgressPanel
                         status={report.status}
@@ -780,7 +783,7 @@ export function AutomationReportPage() {
                     .cta-btn--blue::after  { background-color: var(--cta-primary, #6366f1); }
                     .cta-btn--violet::after { background-color: var(--cta-primary, #6366f1); }
                 `}</style>
-                <NavBar id={id} navigate={navigate} />
+                <NavBar id={id} navigate={navigate} repoName={repoName} />
                 <div className="max-w-3xl mx-auto px-6 py-20 flex flex-col items-center text-center gap-6">
                     <div className="w-20 h-20 rounded-2xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 flex items-center justify-center">
                         <Bot className="w-10 h-10 text-indigo-400" />
@@ -839,7 +842,7 @@ export function AutomationReportPage() {
                 .cta-btn--blue::after  { background-color: var(--cta-primary, #6366f1); }
                 .cta-btn--violet::after { background-color: var(--cta-primary, #6366f1); }
             `}</style>
-            <NavBar id={id} navigate={navigate} />
+            <NavBar id={id} navigate={navigate} repoName={repoName} />
 
             <div className="max-w-5xl mx-auto px-6 md:px-10 py-10">
                 <div className="flex items-start justify-between mb-10">
@@ -1104,7 +1107,7 @@ export function AutomationReportPage() {
 }
 
 // Shared navbar component
-function NavBar({ id, navigate }: { id: string; navigate: (path: string) => void }) {
+function NavBar({ id, navigate, repoName }: { id: string; navigate: (path: string) => void; repoName?: string }) {
     const isDark = typeof window !== 'undefined' && (document.documentElement.classList.contains('dark') || window.matchMedia('(prefers-color-scheme: dark)').matches);
     return (
         <div className="flex-none z-50 border-b border-zinc-200 dark:border-slate-800/80 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl sticky top-0 px-6 h-[60px] flex items-center justify-between">
@@ -1117,7 +1120,7 @@ function NavBar({ id, navigate }: { id: string; navigate: (path: string) => void
                 </button>
                 <div className="flex items-center gap-2 text-sm ml-2">
                     <span className="text-zinc-500 dark:text-slate-400 cursor-pointer hover:text-zinc-800 dark:hover:text-slate-200 transition-colors" onClick={() => navigate(`/repo/${id}`)}>
-                        Repository
+                        {repoName || 'Repository'}
                     </span>
                     <span className="text-zinc-300 dark:text-slate-700">/</span>
                     <span className="font-semibold text-zinc-900 dark:text-slate-100">Automation Report</span>

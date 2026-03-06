@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
+import { getRepo } from '../../lib/api';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -101,7 +102,7 @@ export function PipelinePage() {
   const { isDarkMode, setIsDarkMode } = useTheme();
   const themeClass = isDarkMode ? 'dark' : '';
 
-  const repoName = id ?? 'Unknown';
+  const [repoName, setRepoName] = useState<string>('');
 
   // ── Fortress QA Strategist ────────────────────────────────────────────────
   const [isFortressLoading, setIsFortressLoading] = useState(false);
@@ -113,6 +114,7 @@ export function PipelinePage() {
   // ── Restore cached Fortress data on mount ────────────────────────────────
   useEffect(() => {
     if (!id) return;
+    getRepo(id).then(r => setRepoName(r.name)).catch(() => {});
     try {
       const cachedQA = localStorage.getItem(`velocis:fortress:qa:${id}`);
       if (cachedQA) {

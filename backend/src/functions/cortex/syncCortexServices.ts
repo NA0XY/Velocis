@@ -653,25 +653,23 @@ function calculateServiceMetrics(nodes: CortexNode[]): {
     lastModified?: string;
 } {
     const fileCount = nodes.length;
-    
-    // Estimate LOC based on dependency/import counts (rough heuristic)
-    // Average file: 50 LOC base + 10 LOC per depender + 5 LOC per import
+
     let linesOfCode = 0;
     let totalComplexity = 0;
-    
+
     for (const node of nodes) {
-        const exportedToCount = node.dependencyCount ?? 0; // how many nodes depend on this
-        const importedFromCount = node.importCount ?? 0;  // how many modules this imports
-        const estimatedLoc = 50 + (exportedToCount * 10) + (importedFromCount * 5);
-        linesOfCode += estimatedLoc;
-        
+        // Use actual LOC from the graph node (computed from full source by countLinesOfCode)
+        linesOfCode += node.linesOfCode ?? 0;
+
+        const exportedToCount = node.dependencyCount ?? 0;
+        const importedFromCount = node.importCount ?? 0;
         // Complexity based on connections (more imports/exports = more complex)
         const nodeComplexity = Math.min(100, exportedToCount * 5 + importedFromCount * 3);
         totalComplexity += nodeComplexity;
     }
-    
+
     const avgComplexity = fileCount > 0 ? Math.round(totalComplexity / fileCount) : 0;
-    
+
     return {
         linesOfCode,
         fileCount,
