@@ -585,7 +585,7 @@ export function RepositoryPage() {
           {/* Left */}
           <div className="flex items-center gap-4">
             <div className="flex items-center">
-              <img src={isDarkMode ? darkLogoImg : lightLogoImg} alt="Velocis" className="h-8 w-auto object-contain" />
+              <img src={isDarkMode ? darkLogoImg : lightLogoImg} alt="Velocis" className="h-[38.4px] w-auto object-contain" />
             </div>
             <div className="flex items-center gap-2 text-sm ml-2">
               <span

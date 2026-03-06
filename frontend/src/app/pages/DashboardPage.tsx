@@ -257,7 +257,7 @@ export function DashboardPage() {
             {/* Left */}
             <div className="flex items-center gap-4">
               <div className="flex items-center">
-                <img src={isDarkMode ? darkLogoImg : lightLogoImg} alt="Velocis" className="h-8 w-auto object-contain" />
+                <img src={isDarkMode ? darkLogoImg : lightLogoImg} alt="Velocis" className="h-[38.4px] w-auto object-contain" />
               </div>
               <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-slate-400 font-medium ml-2">
                 <Home className="w-4 h-4" />

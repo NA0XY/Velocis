@@ -516,7 +516,7 @@ export const AuthPage: React.FC = () => {
                     className="hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 rounded"
                     aria-label="Homepage"
                 >
-                    <img src={lightLogoImg} alt="Velocis" className="h-8 w-auto object-contain" />
+                    <img src={lightLogoImg} alt="Velocis" className="h-[38.4px] w-auto object-contain" />
                 </button>
             </header>
 
