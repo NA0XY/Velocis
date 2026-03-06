@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle, Lightbulb, Info, Home, Folder, Sparkles, Zap, CheckCircle2, Activity, Search, History, Clock, MessageSquare, Plus } from 'lucide-react';
+import { ChevronDown, Shield, Send, Paperclip, FileCode, Sun, Moon, AlertCircle, Lightbulb, Info, Home, Folder, Sparkles, Zap, CheckCircle2, Activity, Search, History, Clock, MessageSquare, Plus, GitBranch } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router';
 import Editor from '@monaco-editor/react';
-import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode, getRepo } from '../../lib/api';
+import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode, getRepo, getWorkspaceBranches } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
 import { translateText } from '../../lib/translate';
 import lightLogoImg from '../../../LightLogo.png';
@@ -168,6 +168,8 @@ export function WorkspacePage() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [allHistoryMessages, setAllHistoryMessages] = useState<Message[]>([]);
   const [repoName, setRepoName] = useState<string>('');
+  const [branches, setBranches] = useState<string[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<string>('');
 
   // Dark mode state
   const { isDarkMode, setIsDarkMode } = useTheme();
@@ -176,6 +178,7 @@ export function WorkspacePage() {
   const themeClass = isDarkMode ? 'dark' : '';
 
   // ─ Fetch initial data on mount ───────────────────────────────────────────────────────
+  // Fetch repo metadata and chat history on mount
   useEffect(() => {
     if (!id) return;
     getRepo(id).then(r => setRepoName(r.name)).catch(() => {});
@@ -189,73 +192,124 @@ export function WorkspacePage() {
       }
     } catch { /* ignore corrupt cache */ }
 
-    getWorkspaceFiles(id, '/', true)
-      .then((wsRes) => {
+    getWorkspaceBranches(id)
+      .then((branchRes) => {
+        const nextBranches = branchRes.branches?.length > 0
+          ? branchRes.branches
+          : [branchRes.default_branch || 'main'];
+        setBranches(nextBranches);
+        setSelectedBranch(branchRes.default_branch || nextBranches[0] || 'main');
+      })
+      .catch(() => {
+        setBranches(['main']);
+        setSelectedBranch('main');
+      });
+
+    getChatHistory(id, 200)
+      .then((chatRes) => {
+        if (!chatRes || chatRes.messages.length === 0) return;
+        const mapped: Message[] = chatRes.messages.map(m => ({
+          role: (m.role === 'user' ? 'user' : 'sentinel') as 'sentinel' | 'user',
+          content: m.content,
+          isAnalysis: m.is_analysis,
+          analysisData: m.analysis ? {
+            line: m.analysis.line,
+            title: m.analysis.title,
+            description: m.analysis.description,
+            chips: m.analysis.suggestions,
+          } : undefined,
+          reviewData: m.review ? {
+            summary: m.review.summary,
+            riskLevel: m.review.risk_level,
+            filesReviewed: m.review.files_reviewed,
+            findings: m.review.findings.map(f => ({
+              severity: f.severity,
+              filePath: f.file_path,
+              line: f.line,
+              title: f.title,
+              description: f.description,
+              fixSuggestion: f.fix_suggestion,
+            })),
+          } : undefined,
+          autoFix: m.auto_fix ? {
+            filePath: m.auto_fix.file_path,
+            reason: m.auto_fix.reason,
+            fixedCode: m.auto_fix.fixed_code,
+          } : undefined,
+          timestamp: m.timestamp_ago,
+        }));
+        setMessages(mapped);
+        setAllHistoryMessages(mapped);
+        try {
+          localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: mapped }));
+        } catch { /* storage full */ }
+      })
+      .catch(() => {});
+  }, [id]);
+
+  // Fetch files and initial file content for the selected branch
+  useEffect(() => {
+    if (!id || !selectedBranch) return;
+
+    let cancelled = false;
+    setIsLoadingFile(true);
+    setIsDropdownOpen(false);
+    setFileSearchQuery('');
+
+    getWorkspaceFiles(id, '/', true, selectedBranch)
+      .then(async (wsRes) => {
+        if (cancelled) return;
+
         const files = wsRes.files.filter(f => f.type === 'file');
         setAllFiles(files);
 
-        const targetFile = files.find(f => f.path === INITIAL_FILE) ? INITIAL_FILE : files[0]?.path;
+        const targetFile = files.find(f => f.path === selectedFile)?.path
+          ?? (files.find(f => f.path === INITIAL_FILE) ? INITIAL_FILE : files[0]?.path);
 
-        if (targetFile) {
-          setSelectedFile(targetFile);
-          Promise.all([
-            getFileContent(id, targetFile).catch(() => null),
-            getAnnotations(id, targetFile).catch(() => null),
-            getChatHistory(id, 200).catch(() => null),
-          ]).then(([fileRes, annotRes, chatRes]) => {
-            if (fileRes) setCodeContent(fileRes.content);
-            else setCodeContent('// Failed to load file content');
+        if (!targetFile) {
+          setSelectedFile('');
+          setCodeContent('// No files found on selected branch');
+          setAnnotations([]);
+          return;
+        }
 
-            if (annotRes) {
-              setAnnotations(annotRes.annotations.map(a => ({
-                line: a.line,
-                type: a.type,
-                message: `${a.title}: ${a.message}`,
-              })));
-            }
-            if (chatRes && chatRes.messages.length > 0) {
-              const mapped: Message[] = chatRes.messages.map(m => ({
-                role: (m.role === 'user' ? 'user' : 'sentinel') as 'sentinel' | 'user',
-                content: m.content,
-                isAnalysis: m.is_analysis,
-                analysisData: m.analysis ? {
-                  line: m.analysis.line,
-                  title: m.analysis.title,
-                  description: m.analysis.description,
-                  chips: m.analysis.suggestions,
-                } : undefined,
-                reviewData: m.review ? {
-                  summary: m.review.summary,
-                  riskLevel: m.review.risk_level,
-                  filesReviewed: m.review.files_reviewed,
-                  findings: m.review.findings.map(f => ({
-                    severity: f.severity,
-                    filePath: f.file_path,
-                    line: f.line,
-                    title: f.title,
-                    description: f.description,
-                    fixSuggestion: f.fix_suggestion,
-                  })),
-                } : undefined,
-                autoFix: m.auto_fix ? {
-                  filePath: m.auto_fix.file_path,
-                  reason: m.auto_fix.reason,
-                  fixedCode: m.auto_fix.fixed_code,
-                } : undefined,
-                timestamp: m.timestamp_ago,
-              }));
-              setMessages(mapped);
-              setAllHistoryMessages(mapped);
-              // Cache to localStorage
-              try {
-                localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: mapped }));
-              } catch { /* storage full */ }
-            }
-          });
+        setSelectedFile(targetFile);
+
+        const [fileRes, annotRes] = await Promise.all([
+          getFileContent(id, targetFile, selectedBranch).catch(() => null),
+          getAnnotations(id, targetFile, selectedBranch).catch(() => null),
+        ]);
+
+        if (cancelled) return;
+
+        if (fileRes) setCodeContent(fileRes.content);
+        else setCodeContent('// Failed to load file content');
+
+        if (annotRes) {
+          setAnnotations(annotRes.annotations.map(a => ({
+            line: a.line,
+            type: a.type,
+            message: `${a.title}: ${a.message}`,
+          })));
+        } else {
+          setAnnotations([]);
         }
       })
-      .catch(console.error);
-  }, [id]);
+      .catch(() => {
+        if (cancelled) return;
+        setAllFiles([]);
+        setSelectedFile('');
+        setCodeContent('// Failed to load repository files');
+        setAnnotations([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingFile(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, selectedBranch]);
 
   const loadFile = async (filePath: string) => {
     if (!id || filePath === selectedFile) return;
@@ -263,8 +317,8 @@ export function WorkspacePage() {
     setSelectedFile(filePath);
     try {
       const [fileRes, annotRes] = await Promise.all([
-        getFileContent(id, filePath).catch(() => null),
-        getAnnotations(id, filePath).catch(() => null)
+        getFileContent(id, filePath, selectedBranch || 'main').catch(() => null),
+        getAnnotations(id, filePath, selectedBranch || 'main').catch(() => null)
       ]);
       if (fileRes) setCodeContent(fileRes.content);
       else setCodeContent('// Failed to load file content');
@@ -383,7 +437,7 @@ export function WorkspacePage() {
       setMessages(prev => [...prev, reviewPrompt]);
       setAllHistoryMessages(prev => [...prev, reviewPrompt]); // Update all history
 
-      const res = await reviewWorkspaceCode(id, { language });
+      const res = await reviewWorkspaceCode(id, { language, ref: selectedBranch || 'main' });
       const reply: Message = {
         role: 'sentinel',
         content: res.content,
@@ -550,7 +604,7 @@ export function WorkspacePage() {
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all font-['JetBrains_Mono',_monospace] text-xs font-semibold text-zinc-700 dark:text-slate-300 group"
               >
                 <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors" />
-                <span className="truncate max-w-[200px]">{selectedFile.split('/').pop() || selectedFile}</span>
+                <span className="truncate max-w-[200px]">{selectedFile.split('/').pop() || selectedFile || 'Select file'}</span>
                 <ChevronDown className={`w-4 h-4 text-zinc-400 dark:text-slate-500 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
 
@@ -604,6 +658,24 @@ export function WorkspacePage() {
 
             {/* Right - Actions */}
             <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 max-w-[180px]">
+                <GitBranch className="w-3.5 h-3.5 text-zinc-500 dark:text-slate-400" />
+                <select
+                  value={selectedBranch}
+                  onChange={(e) => setSelectedBranch(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-zinc-700 dark:text-slate-300 outline-none min-w-[130px]"
+                >
+                  {branches.length === 0 ? (
+                    <option value="">Loading branches...</option>
+                  ) : (
+                    branches.map((branch) => (
+                      <option key={branch} value={branch}>
+                        {branch}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
                 className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-slate-800 transition-colors text-zinc-500 dark:text-slate-400 hover:text-zinc-900 dark:hover:text-slate-100 hidden sm:block"
@@ -636,7 +708,9 @@ export function WorkspacePage() {
                     {selectedFile.split('/').pop() || selectedFile}
                   </span>
                   <span className="text-zinc-300 dark:text-slate-700 mx-1 hidden sm:inline">•</span>
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-zinc-200/50 dark:bg-slate-800 text-zinc-600 dark:text-slate-400 hidden sm:inline transition-colors">main</span>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-zinc-200/50 dark:bg-slate-800 text-zinc-600 dark:text-slate-400 hidden sm:inline transition-colors">
+                    {selectedBranch || 'main'}
+                  </span>
                   <span className="text-zinc-300 dark:text-slate-700 mx-1 hidden md:inline">•</span>
                   <span className="text-xs text-zinc-400 dark:text-slate-500 font-medium hidden md:inline">Updated 12 min ago</span>
                 </div>
@@ -1027,3 +1101,4 @@ export function WorkspacePage() {
     </div>
   );
 }
+

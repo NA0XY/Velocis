@@ -312,6 +312,7 @@ app.post("/api/repos/:repoId/cortex/rebuild", wrap(rebuildCortex.handler as Lamb
 app.get("/api/repos/:repoId/cortex", wrap(getCortexData.handler as LambdaHandler));
 
 // § 10 — Workspace
+app.get("/api/repos/:repoId/workspace/branches", wrap(getWorkspaceData.listBranches as LambdaHandler));
 app.get("/api/repos/:repoId/workspace/files", wrap(getWorkspaceData.listFiles as LambdaHandler));
 app.get("/api/repos/:repoId/workspace/files/content", wrap(getWorkspaceData.getFileContent as LambdaHandler));
 app.get("/api/repos/:repoId/workspace/annotations", wrap(getWorkspaceData.getAnnotations as LambdaHandler));

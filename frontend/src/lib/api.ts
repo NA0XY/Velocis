@@ -462,6 +462,11 @@ export interface WorkspaceFile {
   path: string;
 }
 
+export interface WorkspaceBranchesResponse {
+  default_branch: string;
+  branches: string[];
+}
+
 export interface CodeAnnotation {
   id: string;
   line: number;
@@ -512,12 +517,20 @@ export interface ChatMessage {
   timestamp_ago: string;
 }
 
+export const getWorkspaceBranches = (
+  repoId: string,
+): Promise<WorkspaceBranchesResponse> =>
+  request(`/api/repos/${repoId}/workspace/branches`);
+
 export const getWorkspaceFiles = (
   repoId: string,
   path = '/',
   recursive = false,
+  ref?: string,
 ): Promise<{ path: string; files: WorkspaceFile[] }> =>
-  request(`/api/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}`);
+  request(
+    `/api/repos/${repoId}/workspace/files?path=${encodeURIComponent(path)}${recursive ? '&recursive=true' : ''}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}`,
+  );
 
 export const getFileContent = (
   repoId: string,

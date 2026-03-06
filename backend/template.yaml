@@ -398,6 +398,19 @@ Resources:
             Path:   /repos/{repoId}/workspace/files
             Method: GET
 
+  WorkspaceListBranchesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getWorkspaceData.listBranches
+      Description: GET /repos/:repoId/workspace/branches
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /repos/{repoId}/workspace/branches
+            Method: GET
+
   WorkspaceGetFileContentFunction:
     Type: AWS::Serverless::Function
     Properties:

@@ -218,6 +218,23 @@ export interface RepoTreeItem {
   url: string;
 }
 
+export interface ListRepoBranchesParams {
+  repoFullName: string;
+  token: string;
+  perPage?: number;
+  maxPages?: number;
+}
+
+export interface RepoBranchSummary {
+  name: string;
+  protected: boolean;
+}
+
+export interface ListRepoBranchesResult {
+  defaultBranch: string;
+  branches: RepoBranchSummary[];
+}
+
 // ─────────────────────────────────────────────
 // FILE OPERATIONS
 // ─────────────────────────────────────────────
@@ -854,10 +871,33 @@ export async function fetchRepoTree(
       recursive,
     });
 
+    let treeSha = ref;
+
+    // Resolve branch names to the commit's tree SHA so branch switching in
+    // workspace always returns branch-specific files.
+    if (ref !== "HEAD") {
+      try {
+        const { data: branchData } = await octokit.repos.getBranch({
+          owner,
+          repo,
+          branch: ref,
+        });
+        const { data: commitData } = await octokit.git.getCommit({
+          owner,
+          repo,
+          commit_sha: branchData.commit.sha,
+        });
+        treeSha = commitData.tree.sha;
+      } catch {
+        // Fallback to the raw ref for SHA/tag callers.
+        treeSha = ref;
+      }
+    }
+
     const { data } = await octokit.git.getTree({
       owner,
       repo,
-      tree_sha: ref,
+      tree_sha: treeSha,
       recursive: recursive ? "1" : undefined,
     });
 
@@ -893,6 +933,71 @@ export async function fetchRepoTree(
       error: String(err),
     });
     throw new RepoOpsError("fetchRepoTree", repoFullName, err);
+  }
+}
+
+/**
+ * Lists repository branches and resolves the repository default branch.
+ */
+export async function listRepoBranches(
+  params: ListRepoBranchesParams
+): Promise<ListRepoBranchesResult> {
+  const { repoFullName, token, perPage = 100, maxPages = 3 } = params;
+  const [owner, repo] = splitRepoFullName(repoFullName);
+  const octokit = buildOctokit(token);
+
+  try {
+    logger.info({
+      msg: "repoOps.listRepoBranches",
+      repoFullName,
+      perPage,
+      maxPages,
+    });
+
+    const collected: RepoBranchSummary[] = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const { data } = await octokit.repos.listBranches({
+        owner,
+        repo,
+        per_page: perPage,
+        page,
+      });
+
+      collected.push(
+        ...data.map((branch) => ({
+          name: branch.name,
+          protected: Boolean(branch.protected),
+        }))
+      );
+
+      if (data.length < perPage) break;
+    }
+
+    const { data: repoMeta } = await octokit.repos.get({ owner, repo });
+    const defaultBranch = repoMeta.default_branch ?? "main";
+
+    const dedupedSorted = Array.from(
+      new Map(collected.map((branch) => [branch.name, branch])).values()
+    ).sort((a, b) => a.name.localeCompare(b.name));
+
+    logger.info({
+      msg: "repoOps.listRepoBranches: complete",
+      repoFullName,
+      defaultBranch,
+      branchCount: dedupedSorted.length,
+    });
+
+    return {
+      defaultBranch,
+      branches: dedupedSorted,
+    };
+  } catch (err) {
+    logger.error({
+      msg: "repoOps.listRepoBranches: failed",
+      repoFullName,
+      error: String(err),
+    });
+    throw new RepoOpsError("listRepoBranches", repoFullName, err);
   }
 }
 
@@ -1388,6 +1493,7 @@ export const repoOps = {
   pushInlinePRComment,
   fetchDiff,
   fetchRepoTree,
+  listRepoBranches,
   listUserRepos,
   createCheckRun,
   updateCheckRun,

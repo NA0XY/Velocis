@@ -3,6 +3,7 @@
  * Velocis — Workspace Handlers (Monaco editor + Sentinel AI chat panel)
  *
  * Routes:
+ *   GET  /repos/:repoId/workspace/branches        → Branch list for selector
  *   GET  /repos/:repoId/workspace/files           → File picker listing
  *   GET  /repos/:repoId/workspace/files/content   → Raw file content
  *   GET  /repos/:repoId/workspace/annotations     → Sentinel annotations for a file
@@ -31,7 +32,7 @@ import {
 import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
 import { timeAgo } from "./getDashboard";
 import { logger } from "../../utils/logger";
-import { fetchFileContent, fetchRepoTree } from "../../services/github/repoOps";
+import { fetchFileContent, fetchRepoTree, listRepoBranches } from "../../services/github/repoOps";
 import { translateText } from "../../services/aws/translate";
 import { config } from "../../utils/config";
 import { logActivity } from "../../utils/activityLogger";
@@ -327,6 +328,50 @@ async function resolveRepoName(repoId: string): Promise<string | null> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HANDLER: GET /repos/:repoId/workspace/branches
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const listBranches = async (
+  event: APIGatewayProxyEvent
+): Promise<APIGatewayProxyResult> => {
+  if (event.httpMethod === "OPTIONS") return preflight();
+
+  const user = await resolveUser(event);
+  if (!user) return errors.unauthorized();
+
+  const repoId = event.pathParameters?.repoId;
+  if (!repoId) return errors.badRequest("Missing repoId.");
+
+  let owner = event.headers?.["x-repo-owner"] ?? "";
+  const headerName = event.headers?.["x-repo-name"] ?? "";
+  const name = headerName || (await resolveRepoName(repoId)) || repoId;
+
+  if (!owner) {
+    const inferredOwner = await getGitHubLogin(user.githubToken);
+    if (inferredOwner) owner = inferredOwner;
+    else return errors.badRequest("Missing x-repo-owner header and could not infer owner.");
+  }
+
+  try {
+    const { defaultBranch, branches } = await listRepoBranches({
+      repoFullName: `${owner}/${name}`,
+      token: user.githubToken,
+    });
+
+    const names = branches.map((branch) => branch.name);
+    const ordered = [
+      defaultBranch,
+      ...names.filter((branch) => branch !== defaultBranch),
+    ];
+
+    return ok({ default_branch: defaultBranch, branches: ordered });
+  } catch (e: any) {
+    logger.error({ repoId, msg: "listBranches failed", error: e?.message });
+    return errors.internal("Failed to list repository branches.");
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: GET /repos/:repoId/workspace/files
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -343,6 +388,7 @@ export const listFiles = async (
 
   const path = event.queryStringParameters?.path ?? "/";
   const isRecursive = event.queryStringParameters?.recursive === "true";
+  const ref = event.queryStringParameters?.ref ?? "HEAD";
 
   let owner = event.headers?.["x-repo-owner"] ?? "";
   const headerName = event.headers?.["x-repo-name"] ?? "";
@@ -357,7 +403,12 @@ export const listFiles = async (
   }
 
   try {
-    const tree = await fetchRepoTree({ repoFullName: `${owner}/${name}`, token: user.githubToken, recursive: true });
+    const tree = await fetchRepoTree({
+      repoFullName: `${owner}/${name}`,
+      token: user.githubToken,
+      recursive: true,
+      ref,
+    });
     const dirPath = path === "/" ? "" : path.replace(/^\//, "");
 
     const files = tree
@@ -374,9 +425,9 @@ export const listFiles = async (
         path: `/${item.path}`,
       }));
 
-    return ok({ path, files });
+    return ok({ path, ref, files });
   } catch (e: any) {
-    logger.error({ repoId, path, msg: "listFiles failed", error: e?.message });
+    logger.error({ repoId, path, ref, msg: "listFiles failed", error: e?.message });
     return errors.internal("Failed to list repository files.");
   }
 };
