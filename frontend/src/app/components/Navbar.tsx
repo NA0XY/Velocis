@@ -33,7 +33,7 @@ export function Navbar() {
           tabIndex={0}
           onKeyDown={(e) => e.key === 'Enter' && navigate('/')}
         >
-          <img src={lightLogoImg} alt="Velocis" className="h-8 w-auto object-contain" />
+          <img src={lightLogoImg} alt="Velocis" className="h-[38.4px] w-auto object-contain" />
 
         {/* Desktop actions */}
         <div className="hidden md:flex items-center gap-3">

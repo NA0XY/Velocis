@@ -1020,7 +1020,7 @@ export function AutomationReportPage() {
                                                     {report.sentinel && (report.sentinel.totalFindings ?? 0) === 0
                                                         ? 'No Sentinel findings — code appears clean, so no post-fix infrastructure projection is needed.'
                                                         : report.sentinel === null
-                                                        ? 'Sentinel analysis did not complete, so the projected infrastructure plan could not be generated. Check that Amazon Bedrock (Nova Pro) is enabled in your AWS account.'
+                                                        ? 'Sentinel analysis did not complete, so the projected infrastructure plan could not be generated. Check that DeepSeek is properly configured in your environment.'
                                                         : 'A projected post-Sentinel infrastructure plan was not generated for this run.'}
                                                 </div>
                                             )}

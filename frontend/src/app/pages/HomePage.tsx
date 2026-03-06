@@ -1451,7 +1451,7 @@ export function HomePage() {
             {/* Navigation */}
             <header className={`sticky top-0 z-50 border-b transition-all duration-300 ${isScrolled ? 'bg-white/70 backdrop-blur-md border-borderSubtle' : 'bg-transparent border-transparent'}`}>
                 <div className="w-full px-8 h-20 flex items-center justify-between">
-                    <div className="font-display font-bold text-xl tracking-tight"><img src={lightLogoImg} alt="Velocis" className="h-8 w-auto object-contain" /></div>
+                    <div className="font-display font-bold text-xl tracking-tight"><img src={lightLogoImg} alt="Velocis" className="h-[38.4px] w-auto object-contain" /></div>
                     <button onClick={() => navigate('/auth')} className="bg-dark text-textInverse px-5 py-2.5 rounded-button font-medium hover:bg-dark/90 transition-colors">
                         Connect Repository
                     </button>
