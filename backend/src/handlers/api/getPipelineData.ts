@@ -75,8 +75,8 @@ async function requireAuth(
     const rec = res.Item;
     if (!rec) return null;
     if (new Date(rec.expiresAt) < new Date()) return null;
-    // Return githubId as the userId — matches userId written by Fortress pipeline etc.
-    return rec.githubId ?? rec.userLogin ?? `session_${sessionHash}`;
+    // Return userId as the userId — matches userId written by Fortress pipeline etc.
+    return rec.userId ?? rec.githubId ?? rec.userLogin ?? `session_${sessionHash}`;
   } catch {
     return null;
   }

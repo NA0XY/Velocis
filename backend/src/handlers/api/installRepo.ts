@@ -127,13 +127,13 @@ async function resolveUser(
 
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
         try {
-          const githubToken = await getUserToken(sessionRecord.githubId);
-          return { userId: sessionRecord.githubId, githubToken };
+          const githubToken = await getUserToken(sessionRecord.userId);
+          return { userId: sessionRecord.userId, githubToken };
         } catch (tokenErr) {
           // getUserToken may fail if decryption key is wrong or token not found
           // Still return the user with empty token — install simulation doesn't need it
           logger.warn({ msg: "Could not retrieve GitHub token, proceeding with empty token", error: String(tokenErr) });
-          return { userId: sessionRecord.githubId, githubToken: "" };
+          return { userId: sessionRecord.userId, githubToken: "" };
         }
       }
     } catch (e) {

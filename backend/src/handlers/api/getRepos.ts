@@ -70,10 +70,10 @@ export const handler = async (
             };
         }
 
-        const { githubId, userLogin } = sessionRecord;
+        const { userId, userLogin } = sessionRecord;
 
         // ── Fetch decrypted token & call GitHub API ────────────────────────────
-        const accessToken = await getUserToken(githubId);
+        const accessToken = await getUserToken(userId);
 
         // Fetch up to 100 repos (sorted by most recently updated)
         const reposResponse = await fetch(

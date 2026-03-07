@@ -37,17 +37,17 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
             if (session && new Date(session.expiresAt) > new Date()) {
                 let githubToken = "";
                 try {
-                    githubToken = await getUserToken(session.githubId);
+                    githubToken = await getUserToken(session.userId);
                 } catch {
                     try {
                         const u = await dynamoClient.get<{ accessToken?: string; github_token?: string }>({
                             tableName: DYNAMO_TABLES.USERS,
-                            key: { githubId: session.githubId },
+                            key: { githubId: session.userId },
                         });
                         githubToken = u?.accessToken ?? u?.github_token ?? "";
                     } catch { /* non-fatal */ }
                 }
-                return { userId: session.githubId, githubToken };
+                return { userId: session.userId, githubToken };
             }
         } catch (e) {
             logger.error({ msg: "Session lookup failed", error: String(e) });

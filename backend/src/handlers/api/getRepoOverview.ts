@@ -38,9 +38,9 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
       if (session && new Date(session.expiresAt) > new Date()) {
         let githubToken = "";
         try {
-          githubToken = await getUserToken(session.githubId);
+          githubToken = await getUserToken(session.userId);
         } catch { /* non-fatal — graph will be empty but page still loads */ }
-        return { userId: session.githubId, githubToken };
+        return { userId: session.userId, githubToken };
       }
     } catch (e) {
       logger.error({ msg: "Session lookup failed", error: String(e) });
