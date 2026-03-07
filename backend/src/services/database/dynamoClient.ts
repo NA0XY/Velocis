@@ -122,7 +122,7 @@ let _docClient: DynamoDBDocumentClient | null = null;
 export function getDocClient(): DynamoDBDocumentClient {
   if (!_docClient) {
     const clientConfig: DynamoDBClientConfig = {
-      region: config.AWS_REGION,
+      region: config.DYNAMO_REGION ?? config.AWS_REGION,
       ...(config.IS_LOCAL && {
         // Point to DynamoDB Local (docker-compose.yml)
         endpoint: config.DYNAMO_LOCAL_ENDPOINT ?? "http://localhost:8000",
@@ -131,12 +131,10 @@ export function getDocClient(): DynamoDBDocumentClient {
           secretAccessKey: "local",
         },
       }),
-      ...(!config.IS_LOCAL && config.AWS_ACCESS_KEY_ID && config.AWS_SECRET_ACCESS_KEY && {
-        credentials: {
-          accessKeyId: config.AWS_ACCESS_KEY_ID,
-          secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
-        },
-      }),
+      // In Lambda, do NOT pass explicit credentials — the SDK auto-detects
+      // AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_SESSION_TOKEN from the
+      // execution role. Passing only the first two without the session token
+      // causes "UnrecognizedClientException: invalid security token".
     };
 
     const rawClient = new DynamoDBClient(clientConfig);
