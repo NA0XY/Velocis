@@ -16,7 +16,7 @@ import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
 
-const dynamo        = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const dynamo        = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
 const JWT_SECRET    = process.env.JWT_SECRET    ?? "changeme-in-production";
 const HEALTH_TABLE  = process.env.HEALTH_TABLE  ?? "velocis-system-health";
 

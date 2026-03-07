@@ -38,7 +38,7 @@ import { Repository } from "../../models/interfaces/Repository";
 // ─────────────────────────────────────────────
 const AGENT_TIMEOUT_MS = 25000; // Lambda safe timeout buffer
 
-const _rawDynamo = new DynamoDBClient({});
+const _rawDynamo = new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" });
 const _docClient = DynamoDBDocumentClient.from(_rawDynamo);
 const SENTINEL_TABLE = process.env.SENTINEL_TABLE ?? "velocis-sentinel";
 const ACTIVITY_TABLE = process.env.ACTIVITY_TABLE ?? "velocis-activity";

@@ -34,7 +34,9 @@ import { repoOps } from "../../services/github/repoOps";
 import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
 import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
 
-const _installDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const _installDocClient = DynamoDBDocumentClient.from(
+  new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" })
+);
 const INSTALL_TABLE = process.env.INSTALL_TABLE ?? "velocis-installations";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";

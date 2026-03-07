@@ -44,7 +44,7 @@ import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClien
 // INTERNALS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
 
 const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";

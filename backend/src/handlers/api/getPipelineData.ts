@@ -33,7 +33,7 @@ import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/an
 import { repoOps, getInstallationToken, fetchFileContent } from "../../services/github/repoOps";
 import { getUserToken } from "../../services/github/auth";
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const PIPELINE_TABLE = process.env.PIPELINE_TABLE ?? "velocis-pipeline-runs";
 const REPOS_TABLE = config.DYNAMO_REPOSITORIES_TABLE;

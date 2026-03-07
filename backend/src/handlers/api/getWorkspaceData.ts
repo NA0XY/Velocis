@@ -42,7 +42,7 @@ import axios from "axios";
 import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
 import { getUserToken, getInstallationTokenForRepo, getAppInstallUrl } from "../../services/github/auth";
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
 // DeepSeek V3.2 on Bedrock — use BEDROCK_REGION (us-east-1), not AWS_REGION (ap-south-1).
 const BEDROCK_REGION = config.BEDROCK_REGION || config.AWS_REGION;
 const DEEPSEEK_V3_MODEL_ID = "deepseek.v3.2";
