@@ -12,6 +12,7 @@ import dagre from 'dagre';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../../lib/theme';
 import { useTutorial, CORTEX_TUTORIAL_KEY, CORTEX_STEPS } from '../../lib/tutorial';
+import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import {
   ChevronLeft, ChevronRight, Search, Shield, TestTube2, Eye, EyeOff,
   RefreshCw, Maximize2, AlertCircle, CheckCircle, AlertTriangle,
@@ -1124,6 +1125,10 @@ function CortexPageContent() {
   const handleRebuild = useCallback(async () => {
     if (!repoId || rebuilding) return;
     setRebuilding(true);
+    // Clear the old map immediately so the user sees an empty state while rebuild runs
+    setServices([]);
+    setNodes([]);
+    setEdges([]);
     try { await rebuildCortex(repoId); window.location.reload(); }
     catch { alert('Rebuild failed — check console.'); setRebuilding(false); }
   }, [repoId, rebuilding]);
@@ -1359,8 +1364,12 @@ function CortexPageContent() {
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <div className="w-7 h-7 rounded-full flex items-center justify-center ml-1 text-xs font-bold cursor-pointer"
-              style={{ backgroundColor: isDark ? '#1e2535' : '#ede9fe', color: isDark ? '#a78bfa' : '#7c3aed', border: `1px solid ${isDark ? 'rgba(139,92,246,0.3)' : 'rgba(139,92,246,0.2)'}` }}>V</div>
+            <AppNavbarProfile
+              onTutorial={() => {
+                localStorage.removeItem(CORTEX_TUTORIAL_KEY);
+                setTimeout(() => start(CORTEX_STEPS, CORTEX_TUTORIAL_KEY), 80);
+              }}
+            />
           </div>
         </div>
 

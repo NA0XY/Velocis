@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
 import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData, getRepo } from '../../lib/api';
 import { useTutorial, INFRA_TUTORIAL_KEY, INFRA_STEPS } from '../../lib/tutorial';
+import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -418,11 +419,12 @@ export function InfrastructurePage() {
               >
                 {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
               </button>
-              <div className="relative ml-1">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center bg-white dark:bg-slate-800 border border-indigo-100 dark:border-indigo-500/30 shadow-sm cursor-pointer hover:scale-105 transition-transform">
-                  <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">R</span>
-                </div>
-              </div>
+              <AppNavbarProfile
+                onTutorial={() => {
+                  localStorage.removeItem(INFRA_TUTORIAL_KEY);
+                  setTimeout(() => start(INFRA_STEPS, INFRA_TUTORIAL_KEY), 80);
+                }}
+              />
             </div>
           </div>
         </div>

@@ -22,6 +22,7 @@ function authFetch(url: string): Promise<Response> {
 }
 import { CommitBarChart } from './DashboardPage';
 import LoadingAnimation from '../components/LoadingAnimation';
+import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import RippleGrid from '../../components/RippleGrid';
 import CardSwap, { Card } from '../../components/CardSwap';
 import Hyperspeed from '../../components/Hyperspeed';
@@ -631,10 +632,12 @@ export function RepositoryPage() {
             >
               {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </button>
-            <div className="relative ml-1">
-              <div className="absolute inset-0 bg-indigo-500/20 blur-md rounded-full" />
-              <div className="w-8 h-8 rounded-full flex items-center justify-center bg-white dark:bg-slate-800 border border-indigo-100 dark:border-indigo-500/30 relative shadow-sm cursor-pointer hover:scale-105 transition-transform text-indigo-600 dark:text-indigo-400 font-bold text-sm">R</div>
-            </div>
+            <AppNavbarProfile
+              onTutorial={() => {
+                localStorage.removeItem(REPO_TUTORIAL_KEY);
+                setTimeout(() => start(REPO_STEPS, REPO_TUTORIAL_KEY), 80);
+              }}
+            />
           </div>
         </div>
 
