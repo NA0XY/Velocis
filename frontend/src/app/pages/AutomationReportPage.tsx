@@ -5,6 +5,7 @@ import { useTutorial, AUTOMATION_TUTORIAL_KEY, AUTOMATION_STEPS } from '../../li
 import { useTheme } from '../../lib/theme';
 import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw, Check, X, Sun, Moon } from 'lucide-react';
 import { AppNavbarProfile } from '../components/AppNavbarProfile';
+import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw, Check, X } from 'lucide-react';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 

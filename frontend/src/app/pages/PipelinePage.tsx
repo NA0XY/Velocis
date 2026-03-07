@@ -11,7 +11,6 @@ import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
 import { getRepo } from '../../lib/api';
 import { useTutorial, PIPELINE_TUTORIAL_KEY, PIPELINE_STEPS } from '../../lib/tutorial';
-import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 

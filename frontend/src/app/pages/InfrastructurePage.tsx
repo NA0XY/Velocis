@@ -7,7 +7,6 @@ import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
 import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData, getRepo } from '../../lib/api';
 import { useTutorial, INFRA_TUTORIAL_KEY, INFRA_STEPS } from '../../lib/tutorial';
-import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 

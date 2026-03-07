@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { Bot, Shield, TestTube2, Cloud, ChevronLeft, Check, AlertTriangle, X, Sun, Moon } from 'lucide-react';
+import { Bot, Shield, TestTube2, Cloud, ChevronLeft, Check, AlertTriangle, X } from 'lucide-react';
 import { useTutorial, SETTINGS_TUTORIAL_KEY, SETTINGS_STEPS } from '../../lib/tutorial';
-import { useTheme } from '../../lib/theme';
-import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -33,7 +31,6 @@ export function RepositorySettingsPage() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { start } = useTutorial();
-    const { isDarkMode, setIsDarkMode } = useTheme();
 
     const [isAutomated, setIsAutomated] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);

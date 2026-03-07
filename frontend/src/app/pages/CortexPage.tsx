@@ -12,7 +12,6 @@ import dagre from 'dagre';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../../lib/theme';
 import { useTutorial, CORTEX_TUTORIAL_KEY, CORTEX_STEPS } from '../../lib/tutorial';
-import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import {
   ChevronLeft, ChevronRight, Search, Shield, TestTube2, Eye, EyeOff,
   RefreshCw, Maximize2, AlertCircle, CheckCircle, AlertTriangle,

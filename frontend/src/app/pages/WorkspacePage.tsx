@@ -9,7 +9,6 @@ import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postC
 import { useTheme } from '../../lib/theme';
 import { translateText } from '../../lib/translate';
 import { useTutorial, WORKSPACE_TUTORIAL_KEY, WORKSPACE_STEPS } from '../../lib/tutorial';
-import { AppNavbarProfile } from '../components/AppNavbarProfile';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
