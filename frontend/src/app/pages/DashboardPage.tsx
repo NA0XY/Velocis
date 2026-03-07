@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Search, Home, Star, Sun, Moon, Loader2, LogOut, MoreVertical, Trash2 } from 'lucide-react';
+import { Search, Home, Star, Sun, Moon, Loader2, LogOut, MoreVertical, Trash2, GraduationCap } from 'lucide-react';
 import type { DashboardResponse, ActivityEvent, SystemHealth } from '../../lib/api';
 import { deleteRepo } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useTheme } from '../../lib/theme';
+import { useTutorial, TUTORIAL_KEY, DASHBOARD_STEPS } from '../../lib/tutorial';
 import LoadingAnimation from '../components/LoadingAnimation';import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 // Default initial values for data while loading or on failure
@@ -130,6 +131,7 @@ export function DashboardPage() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { start } = useTutorial();
 
   const [dashboardData, setDashboardData] = useState<DashboardResponse>(INITIAL_DASHBOARD);
   const [activityData, setActivityData] = useState<ActivityEvent[]>(MOCK_ACTIVITY);
@@ -188,6 +190,15 @@ export function DashboardPage() {
       clearInterval(pollInterval);
     };
   }, [navigate]);
+
+  // ── Auto-launch tutorial on first visit ────────────────────────────────────
+  useEffect(() => {
+    const completed = localStorage.getItem(TUTORIAL_KEY);
+    if (!completed) {
+      const timer = setTimeout(() => start(DASHBOARD_STEPS, TUTORIAL_KEY), 900);
+      return () => clearTimeout(timer);
+    }
+  }, [start]);
 
   const themeClass = isDarkMode ? 'dark' : '';
 
@@ -269,7 +280,7 @@ export function DashboardPage() {
             </div>
 
             {/* Center - Search */}
-            <div className="hidden md:flex flex-1 max-w-[320px] bg-zinc-100/50 dark:bg-slate-800/50 border border-zinc-200 dark:border-slate-700 rounded-lg h-[34px] px-3 items-center gap-2 mx-auto focus-within:ring-2 focus-within:ring-indigo-500/30 transition-all">
+            <div id="tutorial-search" className="hidden md:flex flex-1 max-w-[320px] bg-zinc-100/50 dark:bg-slate-800/50 border border-zinc-200 dark:border-slate-700 rounded-lg h-[34px] px-3 items-center gap-2 mx-auto focus-within:ring-2 focus-within:ring-indigo-500/30 transition-all">
               <Search className="w-3.5 h-3.5 text-zinc-400 dark:text-slate-500" />
               <input
                 type="text"
@@ -290,7 +301,7 @@ export function DashboardPage() {
                 {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
               </button>
 
-              <div className="relative">
+              <div id="tutorial-profile" className="relative">
                 <div className="absolute inset-0 bg-indigo-500/20 blur-md rounded-full" />
                 <button
                   onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -301,12 +312,27 @@ export function DashboardPage() {
                 </button>
 
                 {isProfileOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg py-1 z-50 animate-in fade-in zoom-in duration-150">
+                  <div className="absolute right-0 mt-2 w-52 bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg py-1 z-50 animate-in fade-in zoom-in duration-150">
                     <div className="px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 mb-1">
                       <p className="text-sm font-semibold text-zinc-900 dark:text-slate-100 truncate">
                         {dashboardData?.user.name ?? user?.name ?? 'Developer'}
                       </p>
                     </div>
+                    <button
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        localStorage.removeItem(TUTORIAL_KEY);
+                        // Defer until dropdown has fully unmounted and the
+                        // click event has cleared, so the backdrop doesn't
+                        // accidentally receive the same click.
+                        setTimeout(() => start(DASHBOARD_STEPS, TUTORIAL_KEY), 80);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 flex items-center gap-2 transition-colors"
+                    >
+                      <GraduationCap className="w-4 h-4" />
+                      Start Tutorial
+                    </button>
+                    <div className="mx-3 my-1 border-t border-zinc-100 dark:border-zinc-800" />
                     <button
                       onClick={() => {
                         logout().finally(() => {
@@ -350,7 +376,7 @@ export function DashboardPage() {
               </div>
 
               {/* Unified Metrics Bar */}
-              <div className="mt-6 w-full border border-[rgba(16,24,40,0.06)] dark:border-zinc-800 bg-white dark:bg-[#111114] shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/10 rounded-lg flex divide-x divide-[rgba(16,24,40,0.06)] dark:divide-zinc-800">
+              <div id="tutorial-metrics" className="mt-6 w-full border border-[rgba(16,24,40,0.06)] dark:border-zinc-800 bg-white dark:bg-[#111114] shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/10 rounded-lg flex divide-x divide-[rgba(16,24,40,0.06)] dark:divide-zinc-800">
                 {[
                   { label: 'Healthy Repos', value: String(dashboardData?.summary.healthy ?? '—'), fg: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500', anim: 'animate-[custom-pulse_2.5s_infinite]' },
                   { label: 'Warnings', value: String(dashboardData?.summary.warning ?? '—'), fg: 'text-amber-700 dark:text-amber-500', dot: 'bg-amber-500', anim: '' },
@@ -380,7 +406,7 @@ export function DashboardPage() {
             <div className="h-px bg-gradient-to-r from-zinc-200 dark:from-slate-800/80 to-transparent mt-3 mb-6" />
 
             {/* REPO GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div id="tutorial-repos" className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {!isLoading && dashboardData?.repos?.length === 0 && (
                 <div className="col-span-2 flex flex-col items-center justify-center py-20 gap-3 text-zinc-400 dark:text-slate-500">
                   <span className="text-sm font-medium">No repositories installed yet.</span>
@@ -483,7 +509,7 @@ export function DashboardPage() {
             <div className="flex-1 flex flex-col gap-5">
 
               {/* ACTIVITY PANEL */}
-              <div className="flex flex-col bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] overflow-hidden shrink-0">
+              <div id="tutorial-activity" className="flex flex-col bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] overflow-hidden shrink-0">
                 <div className="p-4 pb-0 shrink-0">
                   <div className="flex justify-between items-center mb-3">
                     <div className="font-semibold tracking-tight text-[15px] text-zinc-900 dark:text-white">Activity</div>
@@ -554,7 +580,7 @@ export function DashboardPage() {
               </div>
 
               {/* SYSTEM PANEL */}
-              <div className="bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] p-5 shrink-0">
+              <div id="tutorial-system" className="bg-white dark:bg-[#111114] border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_rgba(16,24,40,0.06)] ring-1 ring-inset ring-black/5 dark:ring-white/[0.06] p-5 shrink-0">
                 <div className="text-[10px] font-bold tracking-widest uppercase text-zinc-400 dark:text-slate-500 mb-4 font-['JetBrains_Mono',_monospace]">System</div>
                 <div className="space-y-3">
                   {[

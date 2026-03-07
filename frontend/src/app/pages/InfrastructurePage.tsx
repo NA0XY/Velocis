@@ -6,6 +6,7 @@ import { ChevronDown, Download, RefreshCw, Shield, Lock, Zap, RotateCcw, DollarS
 import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
 import { predictInfrastructure, getWorkspaceFiles, getFileContent, type InfraPredictionData, getRepo } from '../../lib/api';
+import { useTutorial, INFRA_TUTORIAL_KEY, INFRA_STEPS } from '../../lib/tutorial';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -17,7 +18,17 @@ export function InfrastructurePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { isDarkMode, setIsDarkMode } = useTheme();
+  const { start } = useTutorial();
   const [environment, setEnvironment] = useState<'production' | 'staging' | 'preview'>('production');
+
+  // Auto-launch infrastructure tutorial on first visit
+  useEffect(() => {
+    const completed = localStorage.getItem(INFRA_TUTORIAL_KEY);
+    if (!completed) {
+      const timer = setTimeout(() => start(INFRA_STEPS, INFRA_TUTORIAL_KEY), 900);
+      return () => clearTimeout(timer);
+    }
+  }, [start]);
   // Cost data is derived entirely from infraData (AI prediction) — no initial mock values
   const [tfCode, setTfCode] = useState<string>(INFRA_TF_PLACEHOLDER);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -359,7 +370,7 @@ export function InfrastructurePage() {
             </div>
 
             {/* Center ΓÇô Environment Selector */}
-            <div className="hidden md:flex items-center p-0.5 rounded-md bg-zinc-100/80 dark:bg-slate-800/80 border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
+            <div id="infra-env-selector" className="hidden md:flex items-center p-0.5 rounded-md bg-zinc-100/80 dark:bg-slate-800/80 border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
               {(['production', 'staging', 'preview'] as const).map((env) => (
                 <button
                   key={env}
@@ -377,6 +388,7 @@ export function InfrastructurePage() {
             {/* Right ΓÇô Actions */}
             <div className="flex items-center gap-2">
               <button
+                id="infra-analyse-btn"
                 className="cta-btn hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
                 title="Analyse real code files to predict AWS infrastructure"
@@ -445,6 +457,7 @@ export function InfrastructurePage() {
 
           {/* ΓöÇΓöÇ LEFT PANE: Code Editor (70%) ΓöÇΓöÇ */}
           <motion.div
+            id="infra-code-panel"
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.4 }}
@@ -683,6 +696,7 @@ export function InfrastructurePage() {
 
           {/* ΓöÇΓöÇ RIGHT PANE: Analytics & Cost (30%) ΓöÇΓöÇ */}
           <motion.div
+            id="infra-cost-panel"
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.4, delay: 0.05 }}
