@@ -15,6 +15,15 @@ Globals:
     # CodeUri points to the pre-compiled TypeScript output.
     # Run `npm run build:lambda` in /backend before `sam deploy`.
     CodeUri:      dist/
+    Policies:
+      - Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+              - bedrock:Converse
+              - bedrock:ConverseStream
+            Resource: "*"
     Environment:
       Variables:
         NODE_ENV:              !Ref Environment
@@ -474,7 +483,7 @@ Resources:
     Properties:
       Handler:     src/handlers/api/getWorkspaceData.sendChatMessage
       Description: POST /repos/:repoId/workspace/chat
-      Timeout:     60
+      Timeout:     29
       MemorySize:  512
       Events:
         Api:
@@ -503,7 +512,7 @@ Resources:
     Properties:
       Handler:     src/handlers/api/getWorkspaceData.reviewCodebase
       Description: POST /repos/:repoId/workspace/review
-      Timeout:     60
+      Timeout:     29
       MemorySize:  512
       Events:
         Api:

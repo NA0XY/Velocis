@@ -454,6 +454,30 @@ async function resolveRepoCreds(repoId: string): Promise<{ repoName: string | nu
   }
 }
 
+/**
+ * Resolves repo name and owner directly via GitHub's numeric repository ID endpoint.
+ * Used as a fallback when DynamoDB lookup fails (e.g. table not yet provisioned).
+ * GET /repositories/{id} works with any valid user/installation token.
+ */
+async function resolveRepoByGitHubId(
+  repoId: string,
+  token: string
+): Promise<{ repoName: string | null; repoOwner: string | null }> {
+  if (!token || !repoId) return { repoName: null, repoOwner: null };
+  try {
+    const res = await axios.get(`https://api.github.com/repositories/${repoId}`, {
+      headers: { Authorization: `Bearer ${token}`, "User-Agent": "Velocis-App" },
+      timeout: 5000,
+    });
+    return {
+      repoName: res.data?.name ?? null,
+      repoOwner: res.data?.owner?.login ?? null,
+    };
+  } catch {
+    return { repoName: null, repoOwner: null };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HANDLER: GET /repos/:repoId/workspace/branches
 // ─────────────────────────────────────────────────────────────────────────────
@@ -712,8 +736,14 @@ export const sendChatMessage = async (
       let name = headerName;
       if (!name || !fetchedOwner) {
         const creds = await resolveRepoCreds(repoId);
-        if (!name) name = creds.repoName ?? repoId;
-        if (!fetchedOwner) fetchedOwner = creds.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
+        if (creds.repoName) name = creds.repoName;
+        if (creds.repoOwner) fetchedOwner = creds.repoOwner;
+        if (!name || !fetchedOwner) {
+          // DynamoDB lookup inconclusive — resolve repo name/owner directly from GitHub by numeric ID
+          const ghRepo = await resolveRepoByGitHubId(repoId, user.githubToken);
+          if (!name) name = ghRepo.repoName ?? repoId;
+          if (!fetchedOwner) fetchedOwner = ghRepo.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
+        }
       }
       if (!fetchedOwner) {
         logger.warn({ repoId, msg: "sendChatMessage: could not resolve repo owner, falling back to conversational mode" });
@@ -933,12 +963,19 @@ export const reviewCodebase = async (
     };
 
     let owner = event.headers?.["x-repo-owner"] ?? "";
-    const name = event.headers?.["x-repo-name"] ?? repoId;
-    if (!owner) {
-      const inferredOwner = await getGitHubLogin(user.githubToken);
-      if (inferredOwner) owner = inferredOwner;
-      else return errors.badRequest("Missing x-repo-owner header and could not infer owner.");
+    let name = event.headers?.["x-repo-name"] ?? "";
+    if (!name || !owner) {
+      const creds = await resolveRepoCreds(repoId);
+      if (creds.repoName) name = creds.repoName;
+      if (creds.repoOwner) owner = creds.repoOwner;
+      if (!name || !owner) {
+        // DynamoDB inconclusive — resolve via GitHub numeric ID endpoint
+        const ghRepo = await resolveRepoByGitHubId(repoId, user.githubToken);
+        if (!name) name = ghRepo.repoName ?? repoId;
+        if (!owner) owner = ghRepo.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
+      }
     }
+    if (!owner) return errors.badRequest("Missing x-repo-owner header and could not infer owner.");
 
     const tree = await fetchRepoTree({
       repoFullName: `${owner}/${name}`,
