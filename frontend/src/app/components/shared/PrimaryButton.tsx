@@ -12,7 +12,7 @@ interface PrimaryButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const sizeMap = {
     sm: 'px-4 py-2 text-[13px] gap-1.5',
-    md: 'px-5 py-2.5 text-[15px] gap-2',
+    md: 'px-5 py-2.5 text-[15pxaaa] gap-2',
     lg: 'px-7 py-3.5 text-base gap-2.5',
 } as const;
 
