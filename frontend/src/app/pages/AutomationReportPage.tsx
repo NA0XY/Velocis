@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { getRepo } from '../../lib/api';
+import { useTutorial, AUTOMATION_TUTORIAL_KEY, AUTOMATION_STEPS } from '../../lib/tutorial';
 import { ChevronLeft, Shield, TestTube2, Cloud, AlertCircle, Bot, ChevronDown, ChevronUp, FileCode, Zap, RotateCcw, Check, X } from 'lucide-react';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
@@ -584,6 +585,16 @@ export function AutomationReportPage() {
     const [error, setError] = useState<string | null>(null);
     const [isRestarting, setIsRestarting] = useState(false);
     const [repoName, setRepoName] = useState<string>('');
+    const { start } = useTutorial();
+
+    // Auto-launch automation report tutorial on first visit
+    useEffect(() => {
+        const completed = localStorage.getItem(AUTOMATION_TUTORIAL_KEY);
+        if (!completed) {
+            const timer = setTimeout(() => start(AUTOMATION_STEPS, AUTOMATION_TUTORIAL_KEY), 900);
+            return () => clearTimeout(timer);
+        }
+    }, [start]);
 
     const fetchReport = useCallback(async () => {
         try {
@@ -854,6 +865,7 @@ export function AutomationReportPage() {
                     </div>
                     <div className="flex items-center gap-3">
                         <button
+                            id="automation-restart-btn"
                             onClick={handleRestart}
                             disabled={isRestarting}
                             className="cta-btn inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
@@ -872,7 +884,7 @@ export function AutomationReportPage() {
 
                 <div className="space-y-8">
                     {/* SENTINEL REVIEW */}
-                    <div className={`${cardCls} rounded-2xl overflow-hidden`}>
+                    <div id="automation-sentinel-card" className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-indigo-50/30 dark:bg-indigo-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center">
@@ -956,7 +968,7 @@ export function AutomationReportPage() {
                     </div>
 
                     {/* FORTRESS TEST PLAN */}
-                    <div className={`${cardCls} rounded-2xl overflow-hidden`}>
+                    <div id="automation-fortress-card" className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-blue-50/30 dark:bg-blue-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center">
@@ -983,7 +995,7 @@ export function AutomationReportPage() {
                     </div>
 
                     {/* INFRASTRUCTURE PREDICTION */}
-                    <div className={`${cardCls} rounded-2xl overflow-hidden`}>
+                    <div id="automation-infra-card" className={`${cardCls} rounded-2xl overflow-hidden`}>
                         <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-amber-50/30 dark:bg-amber-900/10 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center">

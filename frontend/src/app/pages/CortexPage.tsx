@@ -11,6 +11,7 @@ import 'reactflow/dist/style.css';
 import dagre from 'dagre';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../../lib/theme';
+import { useTutorial, CORTEX_TUTORIAL_KEY, CORTEX_STEPS } from '../../lib/tutorial';
 import {
   ChevronLeft, ChevronRight, Search, Shield, TestTube2, Eye, EyeOff,
   RefreshCw, Maximize2, AlertCircle, CheckCircle, AlertTriangle,
@@ -927,6 +928,16 @@ function CortexPageContent() {
 
   // Theme — use global context so it persists across pages
   const { isDarkMode: isDark, setIsDarkMode: setIsDark } = useTheme();
+  const { start } = useTutorial();
+
+  // Auto-launch cortex tutorial on first visit
+  useEffect(() => {
+    const completed = localStorage.getItem(CORTEX_TUTORIAL_KEY);
+    if (!completed) {
+      const timer = setTimeout(() => start(CORTEX_STEPS, CORTEX_TUTORIAL_KEY), 900);
+      return () => clearTimeout(timer);
+    }
+  }, [start]);
   const isDarkRef = useRef(false);
   isDarkRef.current = isDark;
   const bg        = isDark ? '#080a0f'             : '#eef0f4';
@@ -1325,7 +1336,7 @@ function CortexPageContent() {
           </div>
 
           {/* View switcher */}
-          <div className="hidden md:flex items-center p-[3px] rounded-lg gap-[2px]"
+          <div id="cortex-view-switcher" className="hidden md:flex items-center p-[3px] rounded-lg gap-[2px]"
             style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', border: `1px solid ${border}` }}>
             {(['graph', 'service', 'flow'] as const).map(v => (
               <button key={v} onClick={() => setView(v)}
@@ -1367,6 +1378,7 @@ function CortexPageContent() {
                   {/* Graph Controls */}
                   <div className="space-y-2">
                     <button
+                      id="cortex-rebuild-btn"
                       onClick={handleRebuild}
                       disabled={rebuilding}
                       className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[13px] font-semibold transition-all"
@@ -1400,7 +1412,7 @@ function CortexPageContent() {
                   </div>
 
                   {/* Layer Controls */}
-                  <div>
+                  <div id="cortex-layer-controls">
                     <h3 className="text-[10px] font-bold tracking-widest uppercase mb-3" style={{ color: muted }}>Layer Controls</h3>
                     <div className="space-y-1.5">
                       {[
@@ -1440,7 +1452,7 @@ function CortexPageContent() {
           </AnimatePresence>
 
           {/* ══════════ MAIN VIEW AREA ══════════ */}
-          <div className="flex-1 relative overflow-hidden">
+          <div id="cortex-canvas" className="flex-1 relative overflow-hidden">
 
             {/* Left panel toggle */}
             <button onClick={() => setLeftPanelOpen(p => !p)}

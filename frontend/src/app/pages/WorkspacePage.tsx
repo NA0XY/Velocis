@@ -8,6 +8,7 @@ import Editor from '@monaco-editor/react';
 import { getWorkspaceFiles, WorkspaceFile, getFileContent, getAnnotations, postChatMessage, getChatHistory, reviewWorkspaceCode, getRepo, getWorkspaceBranches, pushWorkspaceFile, ApiError } from '../../lib/api';
 import { useTheme } from '../../lib/theme';
 import { translateText } from '../../lib/translate';
+import { useTutorial, WORKSPACE_TUTORIAL_KEY, WORKSPACE_STEPS } from '../../lib/tutorial';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -187,6 +188,16 @@ export function WorkspacePage() {
 
   // Dark mode state
   const { isDarkMode, setIsDarkMode } = useTheme();
+  const { start: startTutorial } = useTutorial();
+
+  // Auto-launch workspace tutorial on first visit
+  useEffect(() => {
+    const completed = localStorage.getItem(WORKSPACE_TUTORIAL_KEY);
+    if (!completed) {
+      const timer = setTimeout(() => startTutorial(WORKSPACE_STEPS, WORKSPACE_TUTORIAL_KEY), 900);
+      return () => clearTimeout(timer);
+    }
+  }, [startTutorial]);
 
   // Apply dark class to an enclosing wrapper
   const themeClass = isDarkMode ? 'dark' : '';
@@ -742,6 +753,7 @@ export function WorkspacePage() {
             {/* Center - File Context */}
             <div className="relative hidden md:flex items-center justify-center">
               <button
+                id="workspace-file-selector"
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all font-['JetBrains_Mono',_monospace] text-xs font-semibold text-zinc-700 dark:text-slate-300 group"
               >
@@ -800,7 +812,7 @@ export function WorkspacePage() {
 
             {/* Right - Actions */}
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 max-w-[180px]">
+              <div id="workspace-branch-selector" className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-zinc-200 dark:border-slate-700 max-w-[180px]">
                 <GitBranch className="w-3.5 h-3.5 text-zinc-500 dark:text-slate-400" />
                 <select
                   value={selectedBranch}
@@ -819,6 +831,7 @@ export function WorkspacePage() {
                 </select>
               </div>
               <button
+                id="workspace-push-btn"
                 onClick={handlePushChanges}
                 disabled={Object.keys(editedFiles).length === 0 || isPushing}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors flex items-center gap-1.5 relative ${
@@ -861,7 +874,7 @@ export function WorkspacePage() {
         {/* Main Workspace (70 / 30 Split) */}
         <div className="flex-1 flex overflow-hidden p-4 sm:p-6 gap-6 relative z-10 max-w-[1920px] mx-auto w-full">
           {/* Code Editor Panel (70%) */}
-          <div className="flex-1 lg:w-[70%] flex flex-col rounded-2xl border border-zinc-200 dark:border-slate-800 bg-white dark:bg-[#010308]/50 shadow-sm overflow-hidden relative transition-colors duration-300">
+          <div id="workspace-editor-panel" className="flex-1 lg:w-[70%] flex flex-col rounded-2xl border border-zinc-200 dark:border-slate-800 bg-white dark:bg-[#010308]/50 shadow-sm overflow-hidden relative transition-colors duration-300">
             {/* Subtle glow behind editor */}
             <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-50/50 dark:bg-indigo-900/10 rounded-full blur-[100px] pointer-events-none" />
 
@@ -938,7 +951,7 @@ export function WorkspacePage() {
           </div>
 
           {/* AI Panel (30%) - Floating Glassmorphic */}
-          <div className="hidden lg:flex w-[30%] flex-col rounded-2xl border border-zinc-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/60 backdrop-blur-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] overflow-hidden relative transition-colors duration-300">
+          <div id="workspace-ai-panel" className="hidden lg:flex w-[30%] flex-col rounded-2xl border border-zinc-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/60 backdrop-blur-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)] overflow-hidden relative transition-colors duration-300">
 
             {/* Top Edge Glow */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-indigo-400/30 to-transparent blur-sm" />
@@ -984,7 +997,7 @@ export function WorkspacePage() {
                     <History className="w-3.5 h-3.5" />
                   </button>
                   {/* Regional Mentorship Hub Toggle */}
-                  <div className="bg-zinc-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg flex items-center border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
+                  <div id="workspace-lang-switcher" className="bg-zinc-100/80 dark:bg-slate-800/80 p-0.5 rounded-lg flex items-center border border-zinc-200/50 dark:border-slate-700/50 shadow-inner transition-colors">
                     {(['en', 'hi', 'ta'] as const).map((lang) => (
                       <button
                         key={lang}
@@ -997,6 +1010,7 @@ export function WorkspacePage() {
                   </div>
                 </div>
                 <button
+                  id="workspace-review-btn"
                   onClick={handleReviewCode}
                   disabled={isReviewing || !id}
                   className="cta-btn w-full min-w-[110px] px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5"
@@ -1287,7 +1301,7 @@ export function WorkspacePage() {
             </div>
 
             {/* Chat Input */}
-            <div className="p-4 bg-white/60 dark:bg-slate-900/60 border-t border-zinc-100/80 dark:border-slate-800/80 backdrop-blur-xl shrink-0 transition-colors">
+            <div id="workspace-chat-input" className="p-4 bg-white/60 dark:bg-slate-900/60 border-t border-zinc-100/80 dark:border-slate-800/80 backdrop-blur-xl shrink-0 transition-colors">
               <div className="flex items-end gap-2 p-1.5 rounded-xl bg-white dark:bg-slate-800 border border-zinc-200 dark:border-slate-700 shadow-sm focus-within:border-indigo-400 dark:focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/10 dark:focus-within:ring-indigo-500/20 transition-all">
                 <button className="p-2 text-zinc-400 dark:text-slate-500 hover:text-zinc-600 dark:hover:text-slate-300 hover:bg-zinc-50 dark:hover:bg-slate-700 rounded-lg transition-colors shrink-0">
                   <Paperclip className="w-4 h-4" />

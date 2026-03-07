@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { Bot, Shield, TestTube2, Cloud, ChevronLeft, Check, AlertTriangle, X } from 'lucide-react';
+import { useTutorial, SETTINGS_TUTORIAL_KEY, SETTINGS_STEPS } from '../../lib/tutorial';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -29,11 +30,21 @@ const automationOptions: AutomateOption[] = [
 export function RepositorySettingsPage() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { start } = useTutorial();
 
     const [isAutomated, setIsAutomated] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [confirmText, setConfirmText] = useState('');
     const [loading, setLoading] = useState(true);
+
+    // Auto-launch settings tutorial on first visit
+    useEffect(() => {
+        const completed = localStorage.getItem(SETTINGS_TUTORIAL_KEY);
+        if (!completed) {
+            const timer = setTimeout(() => start(SETTINGS_STEPS, SETTINGS_TUTORIAL_KEY), 900);
+            return () => clearTimeout(timer);
+        }
+    }, [start]);
 
     const BACKEND = `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'}`;
 
@@ -131,7 +142,7 @@ export function RepositorySettingsPage() {
                 <h1 className="text-3xl font-bold mb-2">Repository Settings</h1>
                 <p className="text-zinc-500 dark:text-zinc-400 mb-8">Manage integrations, automations, and repository-specific behavior.</p>
 
-                <div className={`${cardCls} rounded-2xl overflow-hidden p-8 mb-8`}>
+                <div id="settings-automation-card" className={`${cardCls} rounded-2xl overflow-hidden p-8 mb-8`}>
                     <div className="flex items-start justify-between mb-8">
                         <div>
                             <h2 className="text-xl font-bold mb-2">Autonomous Repository Engine</h2>
@@ -156,6 +167,7 @@ export function RepositorySettingsPage() {
                             </div>
                         ) : (
                             <button
+                                id="settings-enable-btn"
                                 onClick={handleAutomateToggle}
                                 disabled={loading}
                                 className="px-8 py-3 rounded-xl font-bold text-sm transition-all shadow-sm bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-50"
@@ -166,7 +178,7 @@ export function RepositorySettingsPage() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-8 border-y border-zinc-100 dark:border-zinc-800">
-                        <div className="space-y-4">
+                        <div id="settings-workflow-steps" className="space-y-4">
                             <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Automation Workflow</h3>
                             <div className="space-y-6">
                                 <div className="flex gap-4">
@@ -218,7 +230,7 @@ export function RepositorySettingsPage() {
 
             {/* Confirmation Modal */}
             {showConfirm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm p-4">
+                <div id="settings-confirm-modal" className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm p-4">
                     <div className={`${cardCls} w-full max-w-md rounded-2xl p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200`}>
                         <div className="flex items-start gap-4 mb-5">
                             <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">

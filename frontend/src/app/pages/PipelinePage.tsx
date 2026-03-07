@@ -10,6 +10,7 @@ import {
 import { useNavigate, useParams } from 'react-router';
 import { useTheme } from '../../lib/theme';
 import { getRepo } from '../../lib/api';
+import { useTutorial, PIPELINE_TUTORIAL_KEY, PIPELINE_STEPS } from '../../lib/tutorial';
 import lightLogoImg from '../../../LightLogo.png';
 import darkLogoImg from '../../../DarkLogo.png';
 
@@ -100,7 +101,17 @@ export function PipelinePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { isDarkMode, setIsDarkMode } = useTheme();
+  const { start } = useTutorial();
   const themeClass = isDarkMode ? 'dark' : '';
+
+  // Auto-launch pipeline tutorial on first visit
+  useEffect(() => {
+    const completed = localStorage.getItem(PIPELINE_TUTORIAL_KEY);
+    if (!completed) {
+      const timer = setTimeout(() => start(PIPELINE_STEPS, PIPELINE_TUTORIAL_KEY), 900);
+      return () => clearTimeout(timer);
+    }
+  }, [start]);
 
   const [repoName, setRepoName] = useState<string>('');
 
@@ -313,7 +324,7 @@ export function PipelinePage() {
         </div>
 
         {/* ── Sub-header ── */}
-        <div className="shrink-0 px-6 py-3 border-b border-gray-100 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/40 backdrop-blur-sm flex items-center gap-3">
+        <div id="pipeline-sub-header" className="shrink-0 px-6 py-3 border-b border-gray-100 dark:border-slate-800/60 bg-white/60 dark:bg-slate-900/40 backdrop-blur-sm flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-orange-500/10 border border-orange-500/30 shrink-0">
             <Shield className="w-4 h-4 text-orange-400" />
           </div>
@@ -331,7 +342,7 @@ export function PipelinePage() {
         <div className="flex-1 overflow-hidden flex">
 
           {/* ─── LEFT: QA Strategist ─────────────────────────────────────── */}
-          <div className="flex-1 overflow-auto border-r border-gray-200 dark:border-slate-800/70 flex flex-col">
+          <div id="pipeline-qa-panel" className="flex-1 overflow-auto border-r border-gray-200 dark:border-slate-800/70 flex flex-col">
 
             {/* Panel header */}
             <div className="sticky top-0 z-10 px-5 py-3.5 flex items-center justify-between border-b border-gray-100 dark:border-slate-800/60 bg-white/90 dark:bg-[#080d18]/90 backdrop-blur-md shrink-0">
@@ -358,6 +369,7 @@ export function PipelinePage() {
                   </motion.button>
                 )}
                 <button
+                  id="pipeline-gen-qa-btn"
                   onClick={fetchQAPlan}
                   disabled={isFortressLoading}
                   className="cta-btn cta-btn--blue flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -435,7 +447,7 @@ export function PipelinePage() {
           </div>
 
           {/* ─── RIGHT: API Documenter ───────────────────────────────────── */}
-          <div className="flex-1 overflow-auto flex flex-col">
+          <div id="pipeline-docs-panel" className="flex-1 overflow-auto flex flex-col">
 
             {/* Panel header */}
             <div className="sticky top-0 z-10 px-5 py-3.5 flex items-center justify-between border-b border-gray-100 dark:border-slate-800/60 bg-white/90 dark:bg-[#080d18]/90 backdrop-blur-md shrink-0">
@@ -462,6 +474,7 @@ export function PipelinePage() {
                   </motion.button>
                 )}
                 <button
+                  id="pipeline-gen-docs-btn"
                   onClick={fetchApiDocs}
                   disabled={isDocsLoading}
                   className="cta-btn cta-btn--violet flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
