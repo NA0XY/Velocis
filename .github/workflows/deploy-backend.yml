@@ -44,19 +44,19 @@ jobs:
         working-directory: backend
         run: aws lambda update-function-code --function-name velocisBackend --zip-file fileb://backend.zip
 
-      - name: Set Lambda handler
-        run: aws lambda update-function-configuration --function-name velocisBackend --handler index.handler
-
-      - name: Update Lambda environment variables
+      - name: Configure Lambda handler, timeout, and environment
         run: |
           aws lambda update-function-configuration \
             --function-name velocisBackend \
+            --handler index.handler \
+            --timeout 30 \
             --environment "Variables={
               NODE_ENV=production,
               IS_LOCAL=false,
               AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }},
               AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }},
               AWS_REGION=${{ secrets.AWS_REGION }},
+              DYNAMO_REGION=ap-south-1,
               BEDROCK_REGION=us-east-1,
               FRONTEND_URL=${{ secrets.FRONTEND_URL }},
               ALLOWED_ORIGINS=${{ secrets.FRONTEND_URL }},
