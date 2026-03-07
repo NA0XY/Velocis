@@ -37,23 +37,23 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 // Default fallback values used while data is loading or if the API fails
 const FALLBACK_REPO: RepoDetail = {
   id: '',
-  name: 'Loadingâ€¦',
+  name: 'Loading…',
   status: 'healthy',
   status_label: 'Loading',
   visibility: 'private',
-  language: 'â€”',
-  last_scanned_ago: 'â€”',
+  language: '–',
+  last_scanned_ago: '–',
   last_scanned_at: new Date().toISOString(),
-  size_loc: 'â€”',
+  size_loc: '–',
   metrics: {
-    risk_score: 'â€”',
+    risk_score: '–',
     test_stability_pct: 0,
-    architecture_drift: 'â€”',
-    last_action_ago: 'â€”',
+    architecture_drift: '–',
+    last_action_ago: '–',
   },
-  sentinel: { active_prs: 0, last_update_ago: 'â€”' },
-  fortress: { status_message: 'â€”', last_run_ago: 'â€”' },
-  cortex: { last_update_ago: 'â€”', service_count: 0 },
+  sentinel: { active_prs: 0, last_update_ago: '–' },
+  fortress: { status_message: '–', last_run_ago: '–' },
+  cortex: { last_update_ago: '–', service_count: 0 },
   risks: { critical: 0, medium: 0, low: 0 },
   commit_sparkline: [],
   commit_trend_label: '',
@@ -91,14 +91,14 @@ const MiniTerminal = () => (
       <span className="w-[9px] h-[9px] rounded-full bg-[#ff5f57]" />
       <span className="w-[9px] h-[9px] rounded-full bg-[#febc2e]" />
       <span className="w-[9px] h-[9px] rounded-full bg-[#28c840]" />
-      <span className="ml-2 text-[10px] text-zinc-500 font-mono">cortex â€” live trace</span>
+      <span className="ml-2 text-[10px] text-zinc-500 font-mono">cortex – live trace</span>
     </div>
     {/* Terminal body */}
     <div className="p-3 font-mono text-[11px] leading-snug space-y-[3px] flex-1">
-      <div><span className="text-zinc-600">12:01:03</span> <span className="text-emerald-400">[TRACE]</span> <span className="text-zinc-300">GET /api/services â†’ 200</span> <span className="text-zinc-600">38ms</span></div>
+      <div><span className="text-zinc-600">12:01:03</span> <span className="text-emerald-400">[TRACE]</span> <span className="text-zinc-300">GET /api/services → 200</span> <span className="text-zinc-600">38ms</span></div>
       <div><span className="text-zinc-600">12:01:04</span> <span className="text-sky-400">[SPAN ]</span> <span className="text-zinc-300">db.query workers_pool</span> <span className="text-zinc-600">12ms</span></div>
       <div><span className="text-zinc-600">12:01:04</span> <span className="text-amber-400">[WARN ]</span> <span className="text-amber-300/90">writer.go:214 mutex contention</span></div>
-      <div><span className="text-zinc-600">12:01:05</span> <span className="text-emerald-400">[TRACE]</span> <span className="text-zinc-300">POST /api/scale â†’ 202</span> <span className="text-zinc-600">21ms</span></div>
+      <div><span className="text-zinc-600">12:01:05</span> <span className="text-emerald-400">[TRACE]</span> <span className="text-zinc-300">POST /api/scale → 202</span> <span className="text-zinc-600">21ms</span></div>
       <div className="flex items-center gap-1 pt-0.5">
         <span className="text-zinc-600">12:01:05</span>
         <span className="text-zinc-400 animate-pulse">â–</span>
@@ -107,7 +107,7 @@ const MiniTerminal = () => (
   </div>
 );
 
-// â”€â”€â”€ PR Risk Bars â€” monochromatic indigo scale, thin (h-1.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── PR Risk Bars – monochromatic indigo scale, thin (h-1.5) ──────────────────────
 const prData = [
   { label: "PR #478", risk: 15 },
   { label: "PR #479", risk: 62 },
@@ -117,7 +117,7 @@ const prData = [
   { label: "PR #483", risk: 27 },
 ];
 
-// Monochromatic indigo: higher risk â†’ more saturated/darker shade
+// Monochromatic indigo: higher risk → more saturated/darker shade
 const getIndigoBarColor = (risk: number) => {
   if (risk >= 80) return 'bg-indigo-700 dark:bg-indigo-500';
   if (risk >= 55) return 'bg-indigo-500 dark:bg-indigo-400';
@@ -636,7 +636,7 @@ export function RepositoryPage() {
           </div>
         </div>
 
-        {/* MAIN CONTENT â€” two-column layout */}
+        {/* MAIN CONTENT – two-column layout */}
         <div className="w-full flex-1 flex flex-col min-h-0">
           <div className="relative z-10 w-full flex-1">
 
@@ -652,11 +652,11 @@ export function RepositoryPage() {
               <div className="flex items-center gap-3 mb-8 text-xs font-medium text-zinc-500 dark:text-slate-400 flex-wrap">
                 {[repo.visibility, repo.language, repo.size_loc].map((txt, i) => (
                   <React.Fragment key={i}>
-                    {i > 0 && <span className="text-zinc-300 dark:text-slate-600 text-[10px]">â€¢</span>}
+                    {i > 0 && <span className="text-zinc-300 dark:text-slate-600 text-[10px]">•</span>}
                     <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-slate-300">{txt}</div>
                   </React.Fragment>
                 ))}
-                <span className="text-zinc-300 dark:text-slate-600 text-[10px]">â€¢</span>
+                <span className="text-zinc-300 dark:text-slate-600 text-[10px]">•</span>
                 <span className="text-zinc-400 dark:text-slate-500 text-xs">Scanned {repo.last_scanned_ago}</span>
               </div>
             </div>
@@ -922,7 +922,7 @@ export function RepositoryPage() {
 
           </div>
 
-          {/* FOOTER â€” full width */}
+          {/* FOOTER – full width */}
           <div className="px-6 md:px-10 py-5 border-t border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row justify-between items-center gap-4">
             <div className="text-xs text-zinc-400 dark:text-zinc-500">Â© 2026 Velocis Technologies</div>
             <div className="flex gap-5">
