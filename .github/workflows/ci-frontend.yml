@@ -1,0 +1,61 @@
+name: Frontend CI (Type-check & Build)
+
+# Amplify handles the actual deploy automatically when you push to main.
+# This workflow runs first as a quality gate — it blocks bad code from
+# reaching Amplify and wasting build minutes on a broken deploy.
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci-frontend.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+
+concurrency:
+  group: ci-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Type-check & Vite Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Vite production build
+        working-directory: frontend
+        # Provide a dummy backend URL so the build doesn't fail on a missing env var.
+        # The real value is set in Amplify Console under Environment Variables.
+        env:
+          VITE_BACKEND_URL: https://placeholder.execute-api.ap-south-1.amazonaws.com/v1
+        run: npm run build
+
+      # Optional: upload the dist/ folder as an artifact for inspection
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1

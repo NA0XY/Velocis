@@ -2,7 +2,51 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Description: >
-  Velocis Backend — AWS SAM template defining all Lambda functions and
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Alternatively add a _redirects file (supported by Amplify Hosting):##   Type:    200 (Rewrite)#   Target:  /index.html#   Source:  </^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>## (or via CLI) because amplify.yml does not support redirects directly:# Amplify Console also needs a custom rewrite rule added via the Console UI          value: "1; mode=block"        - key: X-XSS-Protection          value: "DENY"        - key: X-Frame-Options          value: "nosniff"        - key: X-Content-Type-Options          value: "no-store"        - key: Cache-Control      headers:    - pattern: "**/*"  customHeaders:  # ─────────────────────────────────────────────────────────────────────────  # browser JS router takes over.  # This redirects all unmatched paths to index.html with a 200 so the  # (e.g. /dashboard, /repo/123/cortex) returns a 404 from the CDN.  # React Router uses client-side routing. Without this rule every direct URL  # SPA REWRITE RULE  # ─────────────────────────────────────────────────────────────────────────      - node_modules/**/*    paths:  cache:      - "**/*"    files:    baseDirectory: dist    # Vite outputs to dist/ by default  artifacts:        - npm run build        # e.g. https://xxxxxxxxxx.execute-api.ap-south-1.amazonaws.com/v1        # VITE_BACKEND_URL must be set in Amplify Console → Environment Variables      commands:    build:        - npm install        # Install dependencies (Amplify auto-detects pnpm/npm/yarn)      commands:  Velocis Backend — AWS SAM template defining all Lambda functions and
   API Gateway routes per the API contract (v1.0.0).
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -14,37 +58,59 @@ Globals:
     Timeout:      30
     MemorySize:   256
     Architectures: [arm64]
+    # CodeUri points to the pre-compiled TypeScript output.
+    # Run `npm run build:lambda` in /backend before `sam deploy`.
+    CodeUri:      dist/
     Environment:
       Variables:
         NODE_ENV:              !Ref Environment
         AWS_REGION_OVERRIDE:   !Ref AWS::Region
-        USERS_TABLE:           !Ref UsersTable
-        REPOS_TABLE:           !Ref ReposTable
-        SENTINEL_TABLE:        !Ref SentinelTable
-        PIPELINE_TABLE:        !Ref PipelineTable
-        CORTEX_TABLE:          !Ref CortexTable
-        TIMELINE_TABLE:        !Ref TimelineTable
-        ACTIVITY_TABLE:        !Ref ActivityTable
-        DEPLOYS_TABLE:         !Ref DeploymentsTable
-        ANNOTATIONS_TABLE:     !Ref AnnotationsTable
-        CHAT_TABLE:            !Ref WorkspaceChatTable
-        IAC_TABLE:             !Ref IacTable
-        IAC_JOBS_TABLE:        !Ref IacJobsTable
-        HEALTH_TABLE:          !Ref SystemHealthTable
-        INSTALL_TABLE:         !Ref InstallTable
-        SCAN_JOBS_TABLE:       !Ref ScanJobsTable
-        JWT_SECRET:            !Sub "{{resolve:ssm:/velocis/${Environment}/jwt-secret}}"
-        GITHUB_APP_CLIENT_ID:  !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-id}}"
-        GITHUB_APP_CLIENT_SECRET: !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-secret}}"
-        GITHUB_WEBHOOK_SECRET: !Sub "{{resolve:ssm:/velocis/${Environment}/webhook-secret}}"
-        FRONTEND_ORIGIN:       !Sub "https://app.velocis.dev"
-        API_BASE_URL:          !Sub "https://api.velocis.dev/v1"
+        # ── DynamoDB table names ──────────────────────────────────────────────
+        # These env vars are read directly by handlers (process.env.X_TABLE)
+        # AND aliased below so config.ts defaults resolve to the correct tables.
+        USERS_TABLE:              !Ref UsersTable
+        REPOS_TABLE:              !Ref ReposTable
+        SENTINEL_TABLE:           !Ref SentinelTable
+        PIPELINE_TABLE:           !Ref PipelineTable
+        CORTEX_TABLE:             !Ref CortexTable
+        TIMELINE_TABLE:           !Ref TimelineTable
+        ACTIVITY_TABLE:           !Ref ActivityTable
+        DEPLOYS_TABLE:            !Ref DeploymentsTable
+        ANNOTATIONS_TABLE:        !Ref AnnotationsTable
+        CHAT_TABLE:               !Ref WorkspaceChatTable
+        IAC_TABLE:                !Ref IacTable
+        IAC_JOBS_TABLE:           !Ref IacJobsTable
+        HEALTH_TABLE:             !Ref SystemHealthTable
+        INSTALL_TABLE:            !Ref InstallTable
+        SCAN_JOBS_TABLE:          !Ref ScanJobsTable
+        # Aliases consumed by config.ts / dynamoClient.ts
+        DYNAMO_REPOSITORIES_TABLE: !Ref ReposTable
+        DYNAMO_USERS_TABLE:        !Ref UsersTable
+        DYNAMO_AI_ACTIVITY_TABLE:  !Ref ActivityTable
+        # ── Secrets (SSM Parameter Store) ────────────────────────────────────
+        JWT_SECRET:                !Sub "{{resolve:ssm:/velocis/${Environment}/jwt-secret}}"
+        GITHUB_CLIENT_ID:          !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-id}}"
+        GITHUB_CLIENT_SECRET:      !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-secret}}"
+        GITHUB_WEBHOOK_SECRET:     !Sub "{{resolve:ssm:/velocis/${Environment}/webhook-secret}}"
+        # 64 hex-char AES-256 key used to encrypt/decrypt GitHub OAuth tokens
+        TOKEN_ENCRYPTION_KEY:      !Sub "{{resolve:ssm:/velocis/${Environment}/token-encryption-key}}"
+        # GitHub App credentials (optional — only needed if using GitHub App auth)
+        GITHUB_APP_ID:             !Sub "{{resolve:ssm:/velocis/${Environment}/github-app-id:false}}"
+        GITHUB_APP_PRIVATE_KEY:    !Sub "{{resolve:ssm:/velocis/${Environment}/github-app-private-key:false}}"
+        # ── URLs / CORS ───────────────────────────────────────────────────────
+        FRONTEND_URL:              !Ref FrontendOrigin
+        ALLOWED_ORIGINS:           !Ref FrontendOrigin
+        GITHUB_OAUTH_REDIRECT_URI: !Ref GithubOAuthRedirectUri
+        API_BASE_URL:              !Sub "https://api.velocis.dev/v1"
+        # ── Bedrock ───────────────────────────────────────────────────────────
+        BEDROCK_REGION:             us-east-1
+        BEDROCK_CLAUDE_MODEL_ID:    anthropic.claude-3-5-sonnet-20241022-v2:0
 
   Api:
     Cors:
       AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
       AllowHeaders: "'Content-Type,Authorization,x-repo-owner,x-repo-name,Cookie,X-Requested-With'"
-      AllowOrigin:  "'https://app.velocis.dev'"
+      AllowOrigin:  !Sub "'${FrontendOrigin}'"
       AllowCredentials: true
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +121,18 @@ Parameters:
     Type:    String
     Default: development
     AllowedValues: [development, staging, production]
+
+  FrontendOrigin:
+    Type:    String
+    Default: "https://app.velocis.dev"
+    Description: >-
+      The Amplify (or custom) domain of the frontend, e.g.
+      https://main.d1abc123.amplifyapp.com  Used for CORS.
+
+  GithubOAuthRedirectUri:
+    Type:    String
+    Default: "https://app.velocis.dev/auth/callback"
+    Description: "GitHub OAuth redirect URI — must match the GitHub App settings."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RESOURCES
@@ -658,6 +736,9 @@ Resources:
         - { AttributeName: jobId, AttributeType: S }
       KeySchema:
         - { AttributeName: jobId, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   SentinelTable:
     Type: AWS::DynamoDB::Table

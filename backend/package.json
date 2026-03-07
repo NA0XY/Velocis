@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "tsc",
+    "build:lambda": "tsc && cp package.json dist/ && cd dist && npm install --omit=dev --prefer-offline",
     "test": "echo \"Error: no test specified\" && exit 1",
     "init:tables": "tsx src/scripts/initCortexTables.ts",
     "init:cortex": "tsx src/scripts/initCortexTables.ts"

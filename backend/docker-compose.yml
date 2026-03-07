@@ -1,0 +1,62 @@
+# docker-compose.yml — Velocis local development stack
+#
+# Starts DynamoDB Local so you can develop + test without hitting real AWS.
+# The backend reads DYNAMO_LOCAL_ENDPOINT=http://localhost:8000 when IS_LOCAL=true.
+#
+# Usage:
+#   docker compose up -d          # start in background
+#   npm run dev                   # start Express dev server (backend/)
+#   npm run init:tables           # create all DynamoDB tables locally
+#   docker compose down -v        # stop and wipe local DB data
+
+version: "3.8"
+
+networks:
+  velocis-local:
+    name: velocis-local
+
+services:
+  # ── DynamoDB Local ──────────────────────────────────────────────────────────
+  # Runs the official AWS DynamoDB Local image.
+  # -sharedDb  → single shared .db file (visible across all connections)
+  # -dbPath    → persist data in a named Docker volume so it survives restarts
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: velocis-dynamodb-local
+    networks:
+      - velocis-local
+    ports:
+      - "8000:8000"
+    command: >
+      -jar DynamoDBLocal.jar
+      -sharedDb
+      -dbPath /home/dynamodblocal/data/
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data/
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── DynamoDB Admin UI (optional) ────────────────────────────────────────────
+  # Browse your local tables at http://localhost:8001
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:latest
+    container_name: velocis-dynamo-admin
+    networks:
+      - velocis-local
+    ports:
+      - "8001:8001"
+    environment:
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      AWS_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+
+volumes:
+  dynamodb-data:
+    name: velocis-dynamodb-data

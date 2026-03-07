@@ -19,6 +19,12 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { getUserToken } from "../../services/github/auth";
 import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
 import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
@@ -27,6 +33,9 @@ import { config } from "../../utils/config";
 import { repoOps } from "../../services/github/repoOps";
 import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
 import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
+
+const _installDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const INSTALL_TABLE = process.env.INSTALL_TABLE ?? "velocis-installations";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -54,20 +63,33 @@ interface InstallJob {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IN-MEMORY JOB STORE (for local dev — replace with DynamoDB/SQS in prod)
+// DYNAMODB JOB STORE
+// Uses a composite jobId key "JOB#<repoId>#<userId>" so status lookups are
+// a simple GetItem — no scan or GSI needed. Lambda-safe: persists across
+// invocations and container boundaries.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const jobStore = new Map<string, InstallJob>();
+function installJobKey(repoId: string, userId: string): string {
+  return `JOB#${repoId}#${userId}`;
+}
 
-// Also index by repoId+userId for quick lookups
-function findJobsForRepo(repoId: string, userId: string): InstallJob[] {
-  const results: InstallJob[] = [];
-  for (const job of jobStore.values()) {
-    if (job.repoId === repoId && job.userId === userId) {
-      results.push(job);
-    }
-  }
-  return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+async function persistJob(job: InstallJob): Promise<void> {
+  await _installDocClient.send(
+    new PutCommand({
+      TableName: INSTALL_TABLE,
+      Item: { jobId: job.jobId, ...job, ttl: Math.floor(Date.now() / 1000) + 86400 },
+    })
+  );
+}
+
+async function getJob(repoId: string, userId: string): Promise<InstallJob | null> {
+  const result = await _installDocClient.send(
+    new GetCommand({
+      TableName: INSTALL_TABLE,
+      Key: { jobId: installJobKey(repoId, userId) },
+    })
+  );
+  return (result.Item as InstallJob) ?? null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,8 +175,14 @@ async function runInstallJob(
   repoFullName?: string,
   githubToken?: string,
 ): Promise<void> {
-  const job = jobStore.get(jobId);
-  if (!job) return;
+  const job: InstallJob = {
+    jobId,
+    repoId,
+    userId,
+    overallStatus: "in_progress",
+    steps: Object.fromEntries(INSTALL_STEPS.map((s) => [s.id, "queued" as StepStatus])),
+    createdAt: new Date().toISOString(),
+  };
 
   // ── Step 1: Register GitHub webhook ─────────────────────────────────────
   const webhookStep = INSTALL_STEPS[0]; // "webhook"
@@ -188,32 +216,37 @@ async function runInstallJob(
     // Non-fatal: webhook failure should not block installation
     job.steps[webhookStep.id] = "complete";
   }
+  await persistJob(job);
 
   // ── Step 2: Initialize Sentinel (setup only) ─────────────────────────────
   const sentinelStep = INSTALL_STEPS[1]; // "sentinel"
   job.steps[sentinelStep.id] = "in_progress";
+  await persistJob(job);
   try {
-    await new Promise((r) => setTimeout(r, 400));
     job.steps[sentinelStep.id] = "complete";
   } catch (e) {
     logger.error({ jobId, step: sentinelStep.id, msg: "Install step failed", e });
     job.steps[sentinelStep.id] = "failed";
     job.overallStatus = "failed";
+    await persistJob(job);
     return;
   }
+  await persistJob(job);
 
   // ── Step 3: Provision Fortress QA loop ───────────────────────────────────
   const fortressStep = INSTALL_STEPS[2]; // "fortress"
   job.steps[fortressStep.id] = "in_progress";
+  await persistJob(job);
   try {
-    await new Promise((r) => setTimeout(r, 400));
     job.steps[fortressStep.id] = "complete";
   } catch (e) {
     logger.error({ jobId, step: fortressStep.id, msg: "Install step failed", e });
     job.steps[fortressStep.id] = "failed";
     job.overallStatus = "failed";
+    await persistJob(job);
     return;
   }
+  await persistJob(job);
 
   // ── Step 4: Activate Visual Cortex — build initial graph ─────────────────
   const cortexStep = INSTALL_STEPS[3]; // "cortex"
@@ -245,11 +278,13 @@ async function runInstallJob(
     logger.error({ jobId, step: cortexStep.id, msg: "Cortex activation failed", e });
     job.steps[cortexStep.id] = "failed";
     job.overallStatus = "failed";
+    await persistJob(job);
     return;
   }
 
   // Mark overall job complete
   job.overallStatus = "complete";
+  await persistJob(job);
 
   // Persist the repo to the REPOSITORIES table using the shared dynamoClient
   const repoSlug = repoId.toLowerCase().replace(/[^a-z0-9-]/g, "-");
@@ -295,10 +330,9 @@ export const installRepo = async (
   const repoId = event.pathParameters?.repoId;
   if (!repoId) return errors.badRequest("Missing repoId path parameter.");
 
-  // Check if already installed — first check in-memory, then DynamoDB
-  // (in-memory check fails after server restarts, so DynamoDB is authoritative)
-  const existingJobs = findJobsForRepo(repoId, user.userId);
-  if (existingJobs.some((j) => j.overallStatus === "complete")) {
+  // Check if already installed — DynamoDB is the authoritative source
+  const existingJob = await getJob(repoId, user.userId).catch(() => null);
+  if (existingJob?.overallStatus === "complete") {
     return errors.alreadyInstalled(repoId);
   }
   try {
@@ -316,23 +350,22 @@ export const installRepo = async (
     // Non-fatal — if DynamoDB is unavailable, proceed with install
   }
 
-  const jobId = `job_${crypto.randomUUID().replace(/-/g, "").toUpperCase().slice(0, 16)}`;
+  // Use a stable composite key so GET /status can find it with a simple GetItem
+  const jobId = installJobKey(repoId, user.userId);
   const now = new Date().toISOString();
 
-  const initialSteps = Object.fromEntries(
-    INSTALL_STEPS.map((s) => [s.id, "queued" as StepStatus])
-  );
-
-  // Create job in memory
-  const job: InstallJob = {
+  // Persist initial queued state to DynamoDB before firing background work
+  const initialJob: InstallJob = {
     jobId,
     repoId,
     userId: user.userId,
     overallStatus: "queued",
-    steps: initialSteps,
+    steps: Object.fromEntries(INSTALL_STEPS.map((s) => [s.id, "queued" as StepStatus])),
     createdAt: now,
   };
-  jobStore.set(jobId, job);
+  await persistJob(initialJob).catch((e) =>
+    logger.warn({ msg: "Could not persist initial install job", error: String(e) })
+  );
 
   // Extract optional body parameters
   let repoName: string | undefined;
@@ -387,14 +420,12 @@ export const getInstallStatus = async (
   const repoId = event.pathParameters?.repoId;
   if (!repoId) return errors.badRequest("Missing repoId path parameter.");
 
-  // Find the most recent install job for this repo
-  const jobs = findJobsForRepo(repoId, user.userId);
+  // Read install job from DynamoDB (Lambda-safe — no in-memory state)
+  const job = await getJob(repoId, user.userId).catch(() => null);
 
-  if (jobs.length === 0) {
+  if (!job) {
     return errors.notFound(`No install job found for repository '${repoId}'.`);
   }
-
-  const job = jobs[0]; // Already sorted by most recent
 
   const steps = INSTALL_STEPS.map((s) => ({
     id: s.id,

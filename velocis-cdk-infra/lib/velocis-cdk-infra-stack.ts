@@ -37,7 +37,7 @@ export class VelocisCdkInfraStack extends cdk.Stack {
         'aws-marketplace:Subscribe'
       ],
       resources: ['*'],
-    }));5 
+    }));
 
     // 3. Create the API Gateway
     const api = new apigateway.RestApi(this, 'VelocisGithubAPI', {
