@@ -44,6 +44,13 @@ jobs:
         working-directory: backend
         run: aws lambda update-function-code --function-name velocisBackend --zip-file fileb://backend.zip
 
+      - name: Configure Lambda URL CORS
+        run: |
+          aws lambda update-function-url-config \
+            --function-name velocisBackend \
+            --region ${{ secrets.AWS_REGION }} \
+            --cors '{"AllowOrigins":["${{ secrets.FRONTEND_URL }}"],"AllowMethods":["*"],"AllowHeaders":["Content-Type","Authorization","Cookie","X-Requested-With"],"AllowCredentials":true,"MaxAge":86400}'
+
       - name: Configure Lambda handler, timeout, and environment
         run: |
           aws lambda update-function-configuration \
