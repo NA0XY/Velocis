@@ -54,8 +54,16 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173")
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CORS — allow all configured frontend origins
+// CORS — only set headers in local dev.
+// In Lambda, the Function URL CORS config handles this; Express setting them too
+// causes duplicate Access-Control-Allow-Origin headers which browsers reject.
+const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 app.use((req: Request, res: Response, next: NextFunction) => {
+  if (isLambda) {
+    // Lambda URL CORS handles OPTIONS preflights before invoking Lambda,
+    // and adds CORS headers to all responses. Nothing to do here.
+    return next();
+  }
   const origin = req.headers.origin ?? "";
   if (ALLOWED_ORIGINS.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
