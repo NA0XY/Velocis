@@ -210,6 +210,7 @@ export interface DashboardRepo {
   last_activity: { agent: AgentName; message: string; severity: Severity; timestamp_ago: string }[];
   last_scanned_at?: string | null;
   commit_sparkline: number[];
+  total_commits?: number;
   commit_trend_label: string;
   commit_trend_direction: 'up' | 'down' | 'volatile';
   installed_at?: string;

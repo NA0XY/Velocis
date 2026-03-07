@@ -496,17 +496,18 @@ export function DashboardPage() {
                       </div>
                       <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 cursor-pointer" onClick={() => navigate(`/repo/${repo.id}`)}>
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-[10px] uppercase font-bold text-zinc-400 dark:text-slate-500 tracking-wider">commit activity · 7d</div>
                           <div className="text-[10px] font-medium text-zinc-400 dark:text-slate-500">
                             {repo.installed_at
                               ? `Installed ${new Date(repo.installed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at ${new Date(repo.installed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                               : 'Just installed'}
                           </div>
+                          {(repo.total_commits ?? 0) > 0 && (
+                            <div className="text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
+                              {repo.total_commits?.toLocaleString()} commits
+                            </div>
+                          )}
                         </div>
                         <CommitBarChart data={repo.commit_sparkline} color={barColor} />
-                        <div className={`flex justify-end mt-1 text-xs font-bold ${trendColor}`}>
-                          {repo.commit_trend_label === "Just installed" ? "" : repo.commit_trend_label}
-                        </div>
                       </div>
                     </div>
                   );

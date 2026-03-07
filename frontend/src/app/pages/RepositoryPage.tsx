@@ -649,19 +649,8 @@ export function RepositoryPage() {
             <div className="px-6 md:px-10 pt-8 pb-0">
               <div className="flex items-start justify-between mb-3">
                 <h1 className="text-4xl md:text-5xl font-['JetBrains_Mono',_monospace] font-bold text-zinc-900 dark:text-white tracking-tight">{repo.name}</h1>
-                <div className="px-3.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100/50 dark:border-emerald-800/30 flex items-center gap-1.5 mt-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-[custom-pulse_2s_infinite]" />
-                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">{repo.status_label}</span>
-                </div>
               </div>
               <div className="flex items-center gap-3 mb-8 text-xs font-medium text-zinc-500 dark:text-slate-400 flex-wrap">
-                {[repo.visibility, repo.language, repo.size_loc].map((txt, i) => (
-                  <React.Fragment key={i}>
-                    {i > 0 && <span className="text-zinc-300 dark:text-slate-600 text-[10px]">•</span>}
-                    <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-slate-300">{txt}</div>
-                  </React.Fragment>
-                ))}
-                <span className="text-zinc-300 dark:text-slate-600 text-[10px]">•</span>
                 <span className="text-zinc-400 dark:text-slate-500 text-xs">Scanned {repo.last_scanned_ago}</span>
               </div>
             </div>
