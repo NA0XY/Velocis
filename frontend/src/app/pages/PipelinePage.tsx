@@ -317,9 +317,12 @@ export function PipelinePage() {
             >
               {isDarkMode ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </button>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 shadow-sm cursor-pointer">
-              <span className="text-sm font-bold">R</span>
-            </div>
+            <AppNavbarProfile
+              onTutorial={() => {
+                localStorage.removeItem(PIPELINE_TUTORIAL_KEY);
+                setTimeout(() => start(PIPELINE_STEPS, PIPELINE_TUTORIAL_KEY), 80);
+              }}
+            />
           </div>
         </div>
 

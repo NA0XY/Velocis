@@ -128,7 +128,6 @@ function RepoCardMenu({ repoId, onDeleted }: { repoId: string; onDeleted?: (repo
 export function DashboardPage() {
   const [activityTab, setActivityTab] = useState("all");
   const { isDarkMode, setIsDarkMode } = useTheme();
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { start } = useTutorial();
