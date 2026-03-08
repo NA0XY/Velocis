@@ -441,35 +441,60 @@ export function WorkspacePage() {
         context: { file_path: selectedFile, ref: selectedBranch || 'main' },
         language,
       });
-      // Derive autoFix: use backend-parsed auto_fix first; fall back to extracting the
-      // largest fenced code block from the raw content (handles cases where the model
-      // returns markdown code blocks instead of the XML sentinel format).
+      // Derive autoFix: try in order —
+      //   1. Backend-parsed auto_fix (XML SENTINEL_FILE format fully parsed server-side)
+      //   2. Client-side XML <SENTINEL_FILE> extraction (when backend forwarded raw output)
+      //   3. Largest fenced code block fallback (markdown ``` blocks)
       let derivedAutoFix: { filePath: string; reason: string; fixedCode: string } | undefined;
       let rawTextContent = res.content ?? '';
 
       if (res.auto_fix?.file_path && res.auto_fix.fixed_code?.trim().length > 10) {
+        // ── Path 1: structured auto_fix from backend ──────────────────────────
         derivedAutoFix = {
           filePath: res.auto_fix.file_path,
           reason: res.auto_fix.reason ?? '',
           fixedCode: res.auto_fix.fixed_code,
         };
       } else {
-        // Extract the largest code block from content
-        const fenceRe = /```(?:[\w.-]*)?\n?([\s\S]*?)```/g;
-        const blocks: string[] = [];
-        let fm: RegExpExecArray | null;
-        while ((fm = fenceRe.exec(rawTextContent)) !== null) {
-          if (fm[1]?.trim().length > 20) blocks.push(fm[1]);
+        // ── Path 2: client-side XML extraction ───────────────────────────────
+        const xmlFileMatch = rawTextContent.match(
+          /<SENTINEL_FILE\s+path=["']([^"']+)["'][^>]*>([\s\S]*?)<\/SENTINEL_FILE>/i
+        );
+        if (xmlFileMatch) {
+          const xmlFilePath = xmlFileMatch[1].trim() || selectedFile || 'unknown';
+          const xmlCode = xmlFileMatch[2].replace(/^\n/, '').replace(/\n$/, '').trim();
+          if (xmlCode.length > 10) {
+            derivedAutoFix = {
+              filePath: xmlFilePath,
+              reason: rawTextContent.match(/<SENTINEL_REPLY>([\s\S]*?)<\/SENTINEL_REPLY>/i)?.[1]?.trim() || 'Sentinel generated code',
+              fixedCode: xmlCode,
+            };
+            rawTextContent = rawTextContent
+              .replace(/<SENTINEL_REPLY>[\s\S]*?<\/SENTINEL_REPLY>/i, '')
+              .replace(/<SENTINEL_FILE[\s\S]*?<\/SENTINEL_FILE>/i, '')
+              .replace(/\n{3,}/g, '\n\n').trim();
+          }
         }
-        const largest = blocks.sort((a, b) => b.length - a.length)[0];
-        if (largest) {
-          derivedAutoFix = {
-            filePath: selectedFile || 'unknown',
-            reason: 'Sentinel generated code',
-            fixedCode: largest.trim(),
-          };
-          // Strip raw code blocks from the displayed text (they'll appear in the preview card)
-          rawTextContent = rawTextContent.replace(/```[\w.-]*\n?[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+
+        // ── Path 3: fenced code block fallback ───────────────────────────────
+        if (!derivedAutoFix) {
+          const fenceRe = /```(?:[\w.-]*)?\n?([\s\S]*?)```/g;
+          const blocks: string[] = [];
+          let fm: RegExpExecArray | null;
+          while ((fm = fenceRe.exec(rawTextContent)) !== null) {
+            if (fm[1]?.trim().length > 20) blocks.push(fm[1]);
+          }
+          const largest = blocks.sort((a, b) => b.length - a.length)[0];
+          if (largest) {
+            derivedAutoFix = {
+              filePath: selectedFile || 'unknown',
+              reason: 'Sentinel generated code',
+              fixedCode: largest.trim(),
+            };
+            rawTextContent = rawTextContent
+              .replace(/```[\w.-]*\n?[\s\S]*?```/g, '')
+              .replace(/\n{3,}/g, '\n\n').trim();
+          }
         }
       }
 

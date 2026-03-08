@@ -907,7 +907,14 @@ export const sendChatMessage = async (
           msg: "sendChatMessage: parseChatOutput result",
           hasAutoFix: !!autoFix,
           autoFixPath: autoFix?.file_path,
+          rawOutputPreviewForDebug: rawOutput.slice(0, 400),
         });
+
+        // When parsing couldn't extract structured auto_fix, forward the full raw model
+        // output as content so the frontend can attempt its own extraction (XML / fenced blocks).
+        if (!autoFix) {
+          responseContent = rawOutput;
+        }
 
         if (autoFix) {
           const normalizedAutoFixPath = autoFix.file_path.startsWith("/")
