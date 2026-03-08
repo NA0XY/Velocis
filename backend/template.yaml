@@ -484,7 +484,7 @@ Resources:
       Handler:     src/handlers/api/getWorkspaceData.sendChatMessage
       Description: POST /repos/:repoId/workspace/chat
       Timeout:     29
-      MemorySize:  512
+      MemorySize:  1024
       Events:
         Api:
           Type: Api
