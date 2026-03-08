@@ -811,18 +811,22 @@ export const sendChatMessage = async (
     let responseContent = "";
     try {
       // DeepSeek V3.2 on Bedrock uses the Converse API (not InvokeModel)
+      // maxTokens for edit mode capped at 4096 — higher values push inference past
+      // API Gateway's hard 29 s integration timeout and produce 502 errors.
       const cmd = new ConverseCommand({
         modelId: DEEPSEEK_V3_MODEL_ID,
         system: [{ text: systemPrompt }],
         messages: [{ role: "user", content: [{ text: userPrompt }] }],
         inferenceConfig: {
-          maxTokens: wantsEdit ? 8192 : 1024,
+          maxTokens: wantsEdit ? 4096 : 1024,
           temperature: 0.3,
           topP: 0.9,
         },
       });
 
-      const bedrockRes = await bedrock.send(cmd);
+      // Abort 4 s before API Gateway's hard 29 s limit so we can return a
+      // structured error instead of a 502 Bad Gateway.
+      const bedrockRes = await bedrock.send(cmd, { abortSignal: AbortSignal.timeout(25_000) });
       const rawOutput = bedrockRes.output?.message?.content?.[0] &&
         "text" in bedrockRes.output.message.content[0]
         ? (bedrockRes.output.message.content[0] as any).text as string

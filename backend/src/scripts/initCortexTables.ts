@@ -259,9 +259,11 @@ const TABLES: CreateTableCommandInput[] = [
   // ── Workspace chat history ────────────────────────────────────────────────
   {
     TableName: process.env.CHAT_TABLE ?? "velocis-workspace-chat",
-    KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
+    // Partition key must be `messageId` — matches the PutCommand in sendChatMessage
+    // and the WorkspaceChatTable definition in template.yaml.
+    KeySchema: [{ AttributeName: "messageId", KeyType: "HASH" }],
     AttributeDefinitions: [
-      { AttributeName: "id", AttributeType: "S" },
+      { AttributeName: "messageId", AttributeType: "S" },
       { AttributeName: "repoId", AttributeType: "S" },
     ],
     GlobalSecondaryIndexes: [
