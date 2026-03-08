@@ -473,7 +473,7 @@ export function WorkspacePage() {
           reason: res.auto_fix.reason,
           fixedCode: res.auto_fix.fixed_code,
         } : undefined,
-        autoFixApplied: !!res.auto_fix,
+        autoFixApplied: false,
         timestamp: res.timestamp_ago,
       };
       setMessages(prev => {
@@ -483,25 +483,6 @@ export function WorkspacePage() {
       });
       setAllHistoryMessages(prev => [...prev, reply]);
 
-      // Auto-apply edit responses directly into the editor.
-      if (reply.autoFix?.filePath && reply.autoFix.fixedCode) {
-        const fixedPath = reply.autoFix.filePath;
-        setSelectedFile(fixedPath);
-        setCodeContent(reply.autoFix.fixedCode);
-        setAnnotations([]);
-        setEditedFiles(prev => ({ ...prev, [fixedPath]: reply.autoFix!.fixedCode }));
-
-        if (!allFiles.some(f => f.path === fixedPath)) {
-          setAllFiles(prev => [
-            ...prev,
-            {
-              name: fixedPath.split('/').pop() || fixedPath,
-              type: 'file',
-              path: fixedPath,
-            },
-          ]);
-        }
-      }
     } catch {
       setMessages(prev => [...prev, { role: 'sentinel', content: 'Failed to get response. Please try again.', timestamp: 'Just now' }]);
     } finally {
@@ -563,10 +544,14 @@ export function WorkspacePage() {
     const fix = message?.autoFix;
     if (!fix) return;
 
-    setSelectedFile(fix.filePath);
-    setCodeContent(fix.fixedCode);
+    const targetPath = selectedFile || fix.filePath;
+    const ext = targetPath.split('.').pop()?.toLowerCase() ?? '';
+    const commentChar = ['py', 'rb', 'sh', 'bash', 'yaml', 'yml', 'toml'].includes(ext) ? '#' : '//';
+    const newContent = `${codeContent.trimEnd()}\n\n${commentChar} sentinel generated\n${fix.fixedCode.trim()}\n`;
+
+    setCodeContent(newContent);
     setAnnotations([]);
-    setEditedFiles(prev => ({ ...prev, [fix.filePath]: fix.fixedCode }));
+    setEditedFiles(prev => ({ ...prev, [targetPath]: newContent }));
 
     if (!allFiles.some(f => f.path === fix.filePath)) {
       setAllFiles(prev => [
@@ -582,6 +567,30 @@ export function WorkspacePage() {
     setMessages(prev => prev.map((m, idx) => (
       idx === messageIndex ? { ...m, autoFixApplied: true } : m
     )));
+  };
+
+  const handleInjectCode = (messageIndex: number) => {
+    const message = messages[messageIndex];
+    const fix = message?.autoFix;
+    if (!fix) return;
+
+    const targetPath = selectedFile || fix.filePath;
+    const ext = targetPath.split('.').pop()?.toLowerCase() ?? '';
+    const commentChar = ['py', 'rb', 'sh', 'bash', 'yaml', 'yml', 'toml'].includes(ext) ? '#' : '//';
+    const newContent = `${codeContent.trimEnd()}\n\n${commentChar} sentinel generated\n${fix.fixedCode.trim()}\n`;
+
+    setCodeContent(newContent);
+    if (targetPath) {
+      setEditedFiles(prev => ({ ...prev, [targetPath]: newContent }));
+    }
+
+    setMessages(prev => {
+      const updated = prev.map((m, idx) =>
+        idx === messageIndex ? { ...m, autoFixApplied: true } : m
+      );
+      try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
+      return updated;
+    });
   };
 
   // annotations come from API state (set in useEffect above)
@@ -1216,8 +1225,49 @@ export function WorkspacePage() {
                               </button>
                             </div>
                           </div>
+                        ) : message.autoFix && !message.autoFixApplied ? (
+                          /* Code Preview Card — show generated code in chat, let user inject */
+                          <div className="w-full space-y-2">
+                            {message.content && (
+                              <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-zinc-100/80 dark:border-slate-700/80 transition-colors">
+                                <p className="text-[13px] text-zinc-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                                  {message.content}
+                                </p>
+                              </div>
+                            )}
+                            <div className="bg-indigo-50/60 dark:bg-slate-800/90 border border-indigo-200/60 dark:border-indigo-500/20 rounded-xl overflow-hidden shadow-sm transition-colors">
+                              {/* Code preview header */}
+                              <div className="flex items-center justify-between px-3.5 py-2 border-b border-indigo-100/70 dark:border-slate-700/60">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <FileCode className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
+                                  <span className="text-[11px] font-semibold text-zinc-700 dark:text-slate-300 font-['JetBrains_Mono',_monospace] truncate">
+                                    {message.autoFix.filePath.split('/').pop()}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-100/80 dark:bg-indigo-500/20 px-2 py-0.5 rounded shrink-0 ml-2">
+                                  Preview
+                                </span>
+                              </div>
+                              {/* Scrollable code block */}
+                              <pre className="px-3.5 py-2.5 text-[11px] font-['JetBrains_Mono',_monospace] text-zinc-700 dark:text-slate-300 overflow-x-auto max-h-[200px] overflow-y-auto leading-relaxed scrollbar-thin scrollbar-thumb-zinc-200 dark:scrollbar-thumb-slate-700 whitespace-pre-wrap break-all">
+                                {message.autoFix.fixedCode.length > 900
+                                  ? `${message.autoFix.fixedCode.slice(0, 900)}\n// ...`
+                                  : message.autoFix.fixedCode}
+                              </pre>
+                              {/* Inject button */}
+                              <div className="px-3.5 py-2.5 border-t border-indigo-100/70 dark:border-slate-700/60">
+                                <button
+                                  onClick={() => handleInjectCode(index)}
+                                  className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white text-[13px] font-semibold transition-all shadow-sm active:scale-[0.98]"
+                                >
+                                  <Zap className="w-3.5 h-3.5" />
+                                  <span>Inject into code</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         ) : message.autoFix && message.autoFixApplied ? (
-                          /* File Edit Applied Card */
+                          /* Code Injected Confirmation Card */
                           <div className="w-full space-y-2">
                             {message.content && (
                               <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-zinc-100/80 dark:border-slate-700/80 transition-colors">
@@ -1232,7 +1282,7 @@ export function WorkspacePage() {
                                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                                 </div>
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                                  File Updated
+                                  Code Injected
                                 </span>
                               </div>
                               <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">

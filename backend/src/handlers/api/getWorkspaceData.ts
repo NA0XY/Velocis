@@ -778,19 +778,21 @@ export const sendChatMessage = async (
       if (wantsEdit) {
         systemPrompt = [
           "You are Sentinel, an autonomous coding assistant in Velocis Workspace.",
-          "Apply the user's requested change to the file shown below and return the COMPLETE modified file.",
+          "The user wants to add or modify code in the file shown below.",
+          "Generate ONLY the new or modified code snippet to be injected at the bottom of the file.",
+          "Do NOT return the full file — return ONLY the new code to append.",
           "",
           "Respond using EXACTLY this format:",
           "",
           "<SENTINEL_REPLY>",
-          "One or two sentences explaining what you changed.",
+          "One or two sentences explaining what you generated.",
           "</SENTINEL_REPLY>",
           "<SENTINEL_FILE path=\"<exact file path from the request>\">",
-          "<complete modified file content — ALL original code with your changes applied>",
+          "<ONLY the new code snippet to inject — NOT the full file, NOT the existing code>",
           "</SENTINEL_FILE>",
           "",
           "Rules:",
-          "- Return the FULL file content inside SENTINEL_FILE — not just the changed parts.",
+          "- Return ONLY the new/changed code inside SENTINEL_FILE — do NOT include existing unchanged lines from the file.",
           "- Do NOT wrap the code inside SENTINEL_FILE in markdown fences.",
           "- Do NOT include any text outside the two XML blocks above.",
           "- The path attribute must match the target file path exactly.",
@@ -817,27 +819,56 @@ export const sendChatMessage = async (
       let rawOutput = "";
 
       if (wantsEdit) {
-        // Edit mode — use Groq (llama-3.3-70b-versatile) for fast structured output.
-        const groqRes = await axios.post(
-          GROQ_API_URL,
-          {
-            model: GROQ_EDIT_MODEL,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user",   content: userPrompt },
-            ],
-            max_tokens: 8192,
-            temperature: 0.3,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${GROQ_API_KEY}`,
-              "Content-Type": "application/json",
+        // Edit mode — try Bedrock DeepSeek V3 first; fall back to Groq if Bedrock fails.
+        let editBedrockSuccess = false;
+        try {
+          const editCmd = new ConverseCommand({
+            modelId: DEEPSEEK_V3_MODEL_ID,
+            system: [{ text: systemPrompt }],
+            messages: [{ role: "user", content: [{ text: userPrompt }] }],
+            inferenceConfig: {
+              maxTokens: 8192,
+              temperature: 0.3,
+              topP: 0.9,
             },
-            timeout: 60_000,
-          }
-        );
-        rawOutput = groqRes.data?.choices?.[0]?.message?.content ?? "";
+          });
+          const editBedrockRes = await bedrock.send(editCmd);
+          rawOutput = editBedrockRes.output?.message?.content?.[0] &&
+            "text" in editBedrockRes.output.message.content[0]
+            ? (editBedrockRes.output.message.content[0] as any).text as string
+            : "";
+          editBedrockSuccess = rawOutput.trim().length > 0;
+        } catch (bedrockEditErr: any) {
+          logger.warn({
+            repoId,
+            msg: "sendChatMessage: Bedrock edit-mode failed, falling back to Groq",
+            error: bedrockEditErr?.message,
+          });
+        }
+
+        if (!editBedrockSuccess) {
+          // Groq fallback for edit mode
+          const groqRes = await axios.post(
+            GROQ_API_URL,
+            {
+              model: GROQ_EDIT_MODEL,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user",   content: userPrompt },
+              ],
+              max_tokens: 8192,
+              temperature: 0.3,
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${GROQ_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              timeout: 60_000,
+            }
+          );
+          rawOutput = groqRes.data?.choices?.[0]?.message?.content ?? "";
+        }
       } else {
         // Conversational mode — keep using Bedrock DeepSeek.
         const cmd = new ConverseCommand({
