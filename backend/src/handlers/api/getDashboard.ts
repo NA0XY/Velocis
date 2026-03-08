@@ -30,37 +30,6 @@ import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/databa
 import { getUserToken } from "../../services/github/auth.js";
 import * as crypto from "crypto";
 
-/** Fetch the total number of commits for a repo using GitHub's commit list
- * endpoint with per_page=1 and parsing the `Link` header's last page number.
- */
-async function fetchTotalCommits(
-  owner: string,
-  repoName: string,
-  githubToken: string
-): Promise<number> {
-  try {
-    const headers: Record<string, string> = {
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "Velocis-App",
-    };
-    if (githubToken) headers["Authorization"] = `Bearer ${githubToken}`;
-
-    const res = await axios.get(
-      `https://api.github.com/repos/${owner}/${repoName}/commits?per_page=1`,
-      { headers, timeout: 8000 }
-    );
-
-    const linkHeader: string = res.headers?.link ?? "";
-    const match = linkHeader.match(/[?&]page=(\d+)>; rel="last"/);
-    if (match) return parseInt(match[1], 10);
-
-    // If no Link header the result fits in one page — count items returned
-    return Array.isArray(res.data) ? res.data.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
 /** Fetch the last 35 days of daily commit counts for a repo's sparkline.
  * Uses GitHub's /stats/commit_activity endpoint (returns last 52 weeks of
  * Sunday→Saturday buckets, each with a `days` array of 7 daily counts).
@@ -289,7 +258,6 @@ export const handler = async (
 
   // ── Fetch sparklines in parallel for all repos ─────────────────────────────
   const sparklineMap: Record<string, number[]> = {};
-  const totalCommitsMap: Record<string, number> = {};
   if (githubToken) {
     await Promise.all(
       uniqueRepos.map(async (r) => {
@@ -299,12 +267,7 @@ export const handler = async (
         const name: string | undefined = r.repoName ?? r.repoSlug;
         const id = String(r.repoId ?? r.repoSlug ?? "");
         if (owner && name && id) {
-          const [sparkline, total] = await Promise.all([
-            fetchSparkline(owner, name, githubToken),
-            fetchTotalCommits(owner, name, githubToken),
-          ]);
-          sparklineMap[id] = sparkline;
-          totalCommitsMap[id] = total;
+          sparklineMap[id] = await fetchSparkline(owner, name, githubToken);
         }
       })
     );
@@ -314,7 +277,7 @@ export const handler = async (
   const repoDashCards = uniqueRepos.map((r) => {
     const id = String(r.repoSlug ?? r.repoId ?? "");
     const sparkline = sparklineMap[id] ?? [];
-    const total = totalCommitsMap[id] ?? sparkline.reduce((s, v) => s + v, 0);
+    const total = sparkline.reduce((s, v) => s + v, 0);
     let trendLabel = r.commitTrendLabel ?? "";
     let trendDirection = r.commitTrendDirection ?? "flat";
     if (sparkline.length >= 2 && !trendLabel) {
@@ -337,7 +300,6 @@ export const handler = async (
       })),
       last_scanned_at: r.lastReviewAt ?? r.lastScannedAt ?? r.automationReport?.completedAt ?? null,
       commit_sparkline: sparkline,
-      total_commits: total,
       commit_trend_label: trendLabel,
       commit_trend_direction: trendDirection,
       installed_at: r.createdAt || r.updatedAt || r.lastProcessedAt || r.lastPushAt || r.lastScannedAt,
