@@ -52,15 +52,14 @@ async function requireAuth(event: APIGatewayProxyEvent): Promise<string | null> 
       const sessionTokenHash = crypto.createHash("sha256").update(sessionToken).digest("hex");
       const sessionRecord = await dynamoClient.get<{
         userId: string;
-        githubId: string;
         expiresAt: string;
       }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { userId: `session_${sessionTokenHash}` },
+        key: { pk: `SESSION#${sessionTokenHash}` },
       });
 
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
-        return sessionRecord.githubId;
+        return sessionRecord.userId;
       }
     } catch (e) {
       logger.error({ msg: "Error resolving session cookie in cortex handler", error: String(e) });

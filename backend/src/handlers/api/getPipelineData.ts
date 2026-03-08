@@ -70,13 +70,13 @@ async function requireAuth(
   const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
   try {
     const res = await dynamo.send(
-      new GetCommand({ TableName: USERS_TABLE, Key: { userId: `session_${sessionHash}` } })
+      new GetCommand({ TableName: USERS_TABLE, Key: { pk: `SESSION#${sessionHash}` } })
     );
     const rec = res.Item;
     if (!rec) return null;
     if (new Date(rec.expiresAt) < new Date()) return null;
-    // Return githubId as the userId — matches userId written by Fortress pipeline etc.
-    return rec.githubId ?? rec.userLogin ?? `session_${sessionHash}`;
+    // Return userId as the userId — matches userId written by Fortress pipeline etc.
+    return rec.userId ?? rec.userLogin ?? null;
   } catch {
     return null;
   }
@@ -328,7 +328,7 @@ async function executeFortressPipeline(args: {
     } else {
       // installRepo records don't store repoOwner — look up the user's GitHub username
       const userRes = await dynamo.send(
-        new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
+        new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
       );
       repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
     }

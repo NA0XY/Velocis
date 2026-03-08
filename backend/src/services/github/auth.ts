@@ -286,8 +286,8 @@ export async function handleOAuthCallback(
 
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
-    item: storedToken as unknown as Record<string, unknown>,
-    key: "userId",
+    item: { ...storedToken as unknown as Record<string, unknown>, pk: `USER#${String(githubUser.id)}` },
+    key: "pk",
   });
 
   return {
@@ -419,7 +419,7 @@ export async function getAppInstallUrl(): Promise<string> {
 export async function getUserToken(userId: string): Promise<string> {
   const stored = await dynamoClient.get<StoredUserToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId },
+    key: { pk: `USER#${userId}` },
   });
 
   if (!stored) {
@@ -446,7 +446,7 @@ export async function getUserToken(userId: string): Promise<string> {
 export async function revokeUserToken(userId: string): Promise<void> {
   const stored = await dynamoClient.get<StoredUserToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId },
+    key: { pk: `USER#${userId}` },
   });
 
   if (!stored) {
@@ -490,7 +490,7 @@ export async function revokeUserToken(userId: string): Promise<void> {
   // Delete from DynamoDB
   await dynamoClient.remove({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId },
+    key: { pk: `USER#${userId}` },
   });
 
   logger.info({
@@ -539,20 +539,20 @@ async function storeCsrfState(state: string): Promise<void> {
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
     item: {
-      userId: `csrf_${state}`,    // Namespaced to avoid collision with real users
+      pk: `STATE#${state}`,
       state,
       type: "csrf",
       expiresAt: new Date(Date.now() + STATE_TTL_MS).toISOString(),
       ttl: Math.floor((Date.now() + STATE_TTL_MS) / 1000),
     },
-    key: "userId",
+    key: "pk",
   });
 }
 
 async function validateAndConsumeCsrfState(state: string): Promise<void> {
   const record = await dynamoClient.get<{ expiresAt: string }>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId: `csrf_${state}` },
+    key: { pk: `STATE#${state}` },
     consistentRead: true,   // Must be strongly consistent — state was just written milliseconds ago
   });
 
@@ -567,7 +567,7 @@ async function validateAndConsumeCsrfState(state: string): Promise<void> {
   // Consume: delete immediately — one-time use only
   await dynamoClient.remove({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId: `csrf_${state}` },
+    key: { pk: `STATE#${state}` },
   });
 }
 
@@ -580,7 +580,7 @@ async function getCachedInstallationToken(
 ): Promise<StoredInstallationToken | null> {
   return dynamoClient.get<StoredInstallationToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId: `installation_${installationId}` },
+    key: { pk: `INSTALL#${installationId}` },
   });
 }
 
@@ -592,7 +592,7 @@ async function cacheInstallationToken(
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
     item: {
-      userId: `installation_${tokenResult.installationId}`,
+      pk: `INSTALL#${tokenResult.installationId}`,
       installationId: tokenResult.installationId,
       token: encryptedToken,
       expiresAt: tokenResult.expiresAt,
@@ -602,7 +602,7 @@ async function cacheInstallationToken(
       ttl: Math.floor(new Date(tokenResult.expiresAt).getTime() / 1000),
       createdAt: new Date().toISOString(),
     },
-    key: "userId",
+    key: "pk",
   });
 }
 

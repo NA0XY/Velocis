@@ -39,12 +39,12 @@ export const handler = async (
   if (sessionToken) {
     try {
       const sessionTokenHash = crypto.createHash("sha256").update(sessionToken).digest("hex");
-      const sessionRecord = await dynamoClient.get<{ githubId: string; expiresAt: string }>({
+      const sessionRecord = await dynamoClient.get<{ userId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { userId: `session_${sessionTokenHash}` },
+        key: { pk: `SESSION#${sessionTokenHash}` },
       });
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
-        userId = sessionRecord.githubId;
+        userId = sessionRecord.userId;
       }
     } catch (e) {
       logger.error({ msg: "Error resolving session cookie", error: String(e) });
@@ -68,7 +68,7 @@ export const handler = async (
 
   const u = await dynamoClient.get<any>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { userId: userId! },
+    key: { pk: `USER#${userId!}` },
   });
 
   if (!u) return errors.notFound("User not found.");

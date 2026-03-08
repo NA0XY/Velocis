@@ -46,12 +46,11 @@ export const handler = async (
 
         const sessionRecord = await dynamoClient.get<{
             userId: string;
-            githubId: string;
             userLogin: string;
             expiresAt: string;
         }>({
             tableName: DYNAMO_TABLES.USERS,
-            key: { userId: `session_${sessionTokenHash}` },
+            key: { pk: `SESSION#${sessionTokenHash}` },
         });
 
         if (!sessionRecord) {
@@ -70,10 +69,10 @@ export const handler = async (
             };
         }
 
-        const { githubId, userLogin } = sessionRecord;
+        const { userId, userLogin } = sessionRecord;
 
-        // ── Fetch decrypted token & call GitHub API ────────────────────────────
-        const accessToken = await getUserToken(githubId);
+        // ── Fetch decrypted token & call GitHub API ──────────────────────────────────────────
+        const accessToken = await getUserToken(userId);
 
         // Fetch up to 100 repos (sorted by most recently updated)
         const reposResponse = await fetch(
@@ -120,7 +119,7 @@ export const handler = async (
                 tableName: DYNAMO_TABLES.REPOSITORIES,
                 indexName: "userId-index",
                 keyConditionExpression: "ownerGithubId = :ownerGithubId",
-                expressionAttributeValues: { ":ownerGithubId": githubId },
+                expressionAttributeValues: { ":ownerGithubId": userId },
             });
 
             if (installedRepos && installedRepos.items.length > 0) {
@@ -156,7 +155,7 @@ export const handler = async (
         logger.info({
             msg: "getRepos: success",
             requestId,
-            userId: githubId,
+            userId: userId,
             login: userLogin,
             repoCount: result.length,
             installedCount: installedReposMap.size,

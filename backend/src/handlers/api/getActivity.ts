@@ -44,12 +44,12 @@ async function resolveUserId(event: APIGatewayProxyEvent): Promise<string | null
   if (sessionToken) {
     try {
       const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
-      const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
+      const session = await dynamoClient.get<{ userId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { userId: `session_${hash}` },
+        key: { pk: `SESSION#${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) {
-        return session.githubId;
+        return session.userId;
       }
     } catch (e) {
       logger.error({ msg: "Session cookie lookup failed", error: String(e) });

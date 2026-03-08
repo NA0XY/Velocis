@@ -49,11 +49,11 @@ async function requireAuth(event: APIGatewayProxyEvent) {
   if (sessionToken) {
     try {
       const hash = createHash("sha256").update(sessionToken).digest("hex");
-      const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
+      const session = await dynamoClient.get<{ userId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { userId: `session_${hash}` },
+        key: { pk: `SESSION#${hash}` },
       });
-      if (session && new Date(session.expiresAt) > new Date()) return session.githubId;
+      if (session && new Date(session.expiresAt) > new Date()) return session.userId;
     } catch (e) {
       logger.error({ msg: "Session cookie lookup failed", error: String(e) });
     }

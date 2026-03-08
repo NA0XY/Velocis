@@ -111,7 +111,7 @@ export const handler = async (
         // Fetch existing user to preserve createdAt and plan
         const existingUser = await dynamoClient.get<User>({
             tableName: DYNAMO_TABLES.USERS,
-            key: { userId: tokenResult.userId },
+            key: { pk: `USER#${tokenResult.userId}` },
         });
 
         const userRecord: Record<string, unknown> = {
@@ -147,18 +147,19 @@ export const handler = async (
         ).toISOString();
 
         // Run user upsert and session write in parallel — they are independent
+        userRecord.pk = `USER#${tokenResult.userId}`;
         await Promise.all([
             dynamoClient.upsert({
                 tableName: DYNAMO_TABLES.USERS,
                 item: userRecord,
-                key: "userId",
+                key: "pk",
             }),
-            // Store session hash in DynamoDB (keyed by userId, namespaced with prefix)
+            // Store session hash in DynamoDB (keyed by pk, namespaced with prefix)
             dynamoClient.upsert({
                 tableName: DYNAMO_TABLES.USERS,
                 item: {
-                    userId: `session_${sessionTokenHash}`,  // Namespaced session record
-                    githubId: tokenResult.userId,
+                    pk: `SESSION#${sessionTokenHash}`,
+                    userId: tokenResult.userId,
                     userLogin: tokenResult.userLogin,
                     type: "session",
                     expiresAt: sessionExpiresAt,
@@ -166,7 +167,7 @@ export const handler = async (
                     createdAt: now,
                     updatedAt: now,
                 },
-                key: "userId",
+                key: "pk",
             }),
         ]);
 

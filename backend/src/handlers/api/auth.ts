@@ -249,12 +249,11 @@ export const logout = async (
   if (sessionToken) {
     try {
       const sessionTokenHash = createHash("sha256").update(sessionToken).digest("hex");
-      const sessionKey = `session_${sessionTokenHash}`;
 
       // Delete the session record so it can't be reused
       await dynamoClient.remove({
         tableName: DYNAMO_TABLES.USERS,
-        key: { userId: sessionKey },
+        key: { pk: `SESSION#${sessionTokenHash}` },
       });
 
       logger.info({ msg: "User logged out via session cookie" });
