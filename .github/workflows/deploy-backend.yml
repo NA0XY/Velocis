@@ -86,5 +86,5 @@ jobs:
           aws lambda update-function-configuration \
             --function-name velocisBackend \
             --handler index.handler \
-            --timeout 30 \
+            --timeout 120 \
             --environment file:///tmp/lambda-env.json

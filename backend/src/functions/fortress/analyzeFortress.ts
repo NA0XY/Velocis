@@ -177,7 +177,15 @@ export async function generateApiDocs(codeContent: string): Promise<string> {
   };
 
   const command = new ConverseCommand(input);
-  const response = await bedrockClient.send(command);
+
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), 85_000);
+  let response;
+  try {
+    response = await bedrockClient.send(command, { abortSignal: abort.signal });
+  } finally {
+    clearTimeout(abortTimer);
+  }
 
   const outputContent = response.output?.message?.content;
   if (Array.isArray(outputContent) && outputContent.length > 0) {
