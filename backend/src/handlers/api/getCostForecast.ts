@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getCostForecast.ts
  * Velocis — API Handler Layer
  *
@@ -74,9 +74,9 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
-import { verifyRepoAccess } from "../../services/github/auth";
-import { fetchRepoTree } from "../../services/github/repoOps";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
+import { verifyRepoAccess } from "../../services/github/auth.js";
+import { fetchRepoTree } from "../../services/github/repoOps.js";
 import {
   generateIac,
   type IacGenerationResult,
@@ -85,9 +85,9 @@ import {
   type AwsResourceEstimate,
   type AwsEnvironment,
   type DetectedAwsPattern,
-} from "../../functions/predictor/generateIac";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+} from "../../functions/predictor/generateIac.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES

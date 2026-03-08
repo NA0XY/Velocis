@@ -1,4 +1,4 @@
-/**
+﻿/**
  * activityLogger.ts
  * Velocis — Shared Activity Logger
  *
@@ -6,13 +6,13 @@
  * Used by all backend handlers so that the Dashboard Activity panel shows real data.
  *
  * Usage:
- *   import { logActivity } from "../../utils/activityLogger";
+ *   import { logActivity } from "../../utils/activityLogger.js";
  *   logActivity({ userId, repoId, repoName, agent: "cortex", message: "Generated 3D map", severity: "info" });
  */
 
 import { randomUUID } from "crypto";
-import { dynamoClient, DYNAMO_TABLES } from "../services/database/dynamoClient";
-import { logger } from "./logger";
+import { dynamoClient, DYNAMO_TABLES } from "../services/database/dynamoClient.js";
+import { logger } from "./logger.js";
 
 export type ActivityAgent = "sentinel" | "fortress" | "cortex" | "predictor";
 export type ActivitySeverity = "critical" | "warning" | "info" | "healthy";

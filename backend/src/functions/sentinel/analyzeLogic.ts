@@ -1,4 +1,4 @@
-/**
+﻿/**
  * analyzeLogic.ts
  * Velocis — Sentinel: The Guardian & Multilingual Mentor Agent
  *
@@ -61,11 +61,11 @@ import {
   UpdateCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { fetchFileContent, postPullRequestComment } from "../../services/github/repoOps";
-import { translateText, type SupportedLanguageCode } from "../../services/aws/translate";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor";
+import { fetchFileContent, postPullRequestComment } from "../../services/github/repoOps.js";
+import { translateText, type SupportedLanguageCode } from "../../services/aws/translate.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor.js";
 import * as path from "path";
 
 /** Raw DynamoDB client used only for DynamoDBDocumentClient.from().

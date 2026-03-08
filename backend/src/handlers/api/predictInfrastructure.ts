@@ -1,4 +1,4 @@
-/**
+﻿/**
  * predictInfrastructure.ts
  * Velocis - Infrastructure View: IaC Predictor
  *
@@ -19,10 +19,10 @@ import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
-import { ok, errors, preflight } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { logActivity } from "../../utils/activityLogger";
-import { BEDROCK_MODELS } from "../../services/aws/bedrockClient";
+import { ok, errors, preflight } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { logActivity } from "../../utils/activityLogger.js";
+import { BEDROCK_MODELS } from "../../services/aws/bedrockClient.js";
 
 export interface InfrastructurePredictionData {
   impactSummary: string[];

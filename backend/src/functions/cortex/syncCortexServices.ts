@@ -1,4 +1,4 @@
-/**
+﻿/**
  * syncCortexServices.ts
  * Velocis — Visual Cortex Service-Level Aggregator
  *
@@ -25,10 +25,10 @@
  */
 
 import { DynamoDBDocumentClient, PutCommand, BatchWriteCommand, QueryCommand, DeleteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { CortexGraph, CortexNode, CortexEdge } from "./graphBuilder";
-import { getDocClient } from "../../services/database/dynamoClient";
-import { invokeClaude } from "../../services/aws/bedrockClient";
-import { logger } from "../../utils/logger";
+import { CortexGraph, CortexNode, CortexEdge } from "./graphBuilder.js";
+import { getDocClient } from "../../services/database/dynamoClient.js";
+import { invokeClaude } from "../../services/aws/bedrockClient.js";
+import { logger } from "../../utils/logger.js";
 import { randomUUID } from "crypto";
 
 // ─────────────────────────────────────────────────────────────────────────────

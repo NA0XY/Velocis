@@ -1,4 +1,4 @@
-/**
+﻿/**
  * installRepo.ts
  * Velocis — Onboarding / Installation Handlers
  *
@@ -25,18 +25,16 @@ import {
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { getUserToken } from "../../services/github/auth";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { repoOps } from "../../services/github/repoOps";
-import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
-import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
+import { getUserToken } from "../../services/github/auth.js";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { repoOps } from "../../services/github/repoOps.js";
+import { buildCortexGraph } from "../../functions/cortex/graphBuilder.js";
+import { syncCortexServices } from "../../functions/cortex/syncCortexServices.js";
 
-const _installDocClient = DynamoDBDocumentClient.from(
-  new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" })
-);
+const _installDocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const INSTALL_TABLE = process.env.INSTALL_TABLE ?? "velocis-installations";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
@@ -124,18 +122,18 @@ async function resolveUser(
         expiresAt: string;
       }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${sessionTokenHash}` },
+        key: { userId: `session_${sessionTokenHash}` },
       });
 
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
         try {
-          const githubToken = await getUserToken(sessionRecord.userId);
-          return { userId: sessionRecord.userId, githubToken };
+          const githubToken = await getUserToken(sessionRecord.githubId);
+          return { userId: sessionRecord.githubId, githubToken };
         } catch (tokenErr) {
           // getUserToken may fail if decryption key is wrong or token not found
           // Still return the user with empty token — install simulation doesn't need it
           logger.warn({ msg: "Could not retrieve GitHub token, proceeding with empty token", error: String(tokenErr) });
-          return { userId: sessionRecord.userId, githubToken: "" };
+          return { userId: sessionRecord.githubId, githubToken: "" };
         }
       }
     } catch (e) {
@@ -151,7 +149,7 @@ async function resolveUser(
     const { sub: userId } = jwt.verify(token, JWT_SECRET) as { sub: string };
     const userRecord = await dynamoClient.get<any>({
       tableName: DYNAMO_TABLES.USERS,
-      key: { githubId: userId },
+      key: { userId },
     });
     if (!userRecord) return null;
     return { userId, githubToken: userRecord.accessToken ?? userRecord.github_token ?? "" };

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getDashboard.ts
  * Velocis — GET /dashboard
  *
@@ -24,10 +24,10 @@ import {
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
 import * as crypto from "crypto";
 
 /** Fetch the total number of commits for a repo using GitHub's commit list
@@ -140,12 +140,12 @@ export const handler = async (
   if (sessionToken) {
     try {
       const sessionTokenHash = crypto.createHash("sha256").update(sessionToken).digest("hex");
-      const sessionRecord = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
+      const sessionRecord = await dynamoClient.get<{ githubId: string, expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${sessionTokenHash}` },
+        key: { userId: `session_${sessionTokenHash}` },
       });
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
-        userId = sessionRecord.userId;
+        userId = sessionRecord.githubId;
       }
     } catch (e) {
       logger.error({ msg: "Error resolving session cookie", error: String(e) });
@@ -175,7 +175,7 @@ export const handler = async (
   // ── Fetch user ─────────────────────────────────────────────────────────────
   const user = await dynamoClient.get<any>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: userId! }
+    key: { userId: userId! }
   });
 
   if (!user) {

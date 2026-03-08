@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getMe.ts
  * Velocis — GET /me
  *
@@ -9,9 +9,9 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -41,7 +41,7 @@ export const handler = async (
       const sessionTokenHash = crypto.createHash("sha256").update(sessionToken).digest("hex");
       const sessionRecord = await dynamoClient.get<{ githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${sessionTokenHash}` },
+        key: { userId: `session_${sessionTokenHash}` },
       });
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {
         userId = sessionRecord.githubId;
@@ -68,7 +68,7 @@ export const handler = async (
 
   const u = await dynamoClient.get<any>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: userId! },
+    key: { userId: userId! },
   });
 
   if (!u) return errors.notFound("User not found.");

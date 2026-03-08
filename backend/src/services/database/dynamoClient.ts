@@ -1,4 +1,4 @@
-// src/services/database/dynamoClient.ts
+﻿// src/services/database/dynamoClient.ts
 // DynamoDB CRUD wrappers for all Velocis data operations
 // Three tables: Repositories, Users, AI_Activity
 // All operations are strongly typed — no raw AttributeValue anywhere
@@ -27,8 +27,8 @@ import {
   BatchWriteCommandInput,
   TransactWriteCommandInput,
 } from "@aws-sdk/lib-dynamodb";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────
 // TABLE NAMES
@@ -122,7 +122,7 @@ let _docClient: DynamoDBDocumentClient | null = null;
 export function getDocClient(): DynamoDBDocumentClient {
   if (!_docClient) {
     const clientConfig: DynamoDBClientConfig = {
-      region: config.DYNAMO_REGION ?? config.AWS_REGION,
+      region: config.AWS_REGION,
       ...(config.IS_LOCAL && {
         // Point to DynamoDB Local (docker-compose.yml)
         endpoint: config.DYNAMO_LOCAL_ENDPOINT ?? "http://localhost:8000",
@@ -131,10 +131,12 @@ export function getDocClient(): DynamoDBDocumentClient {
           secretAccessKey: "local",
         },
       }),
-      // In Lambda, do NOT pass explicit credentials — the SDK auto-detects
-      // AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_SESSION_TOKEN from the
-      // execution role. Passing only the first two without the session token
-      // causes "UnrecognizedClientException: invalid security token".
+      ...(!config.IS_LOCAL && config.AWS_ACCESS_KEY_ID && config.AWS_SECRET_ACCESS_KEY && {
+        credentials: {
+          accessKeyId: config.AWS_ACCESS_KEY_ID,
+          secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
+        },
+      }),
     };
 
     const rawClient = new DynamoDBClient(clientConfig);

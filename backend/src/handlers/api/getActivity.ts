@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getActivity.ts
  * Velocis — GET /activity
  *
@@ -16,10 +16,10 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const ACTIVITY_TABLE = process.env.ACTIVITY_TABLE ?? "velocis-activity";
@@ -46,7 +46,7 @@ async function resolveUserId(event: APIGatewayProxyEvent): Promise<string | null
       const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
       const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${hash}` },
+        key: { userId: `session_${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) {
         return session.githubId;

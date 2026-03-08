@@ -1,4 +1,4 @@
-// src/services/aws/translate.ts
+﻿// src/services/aws/translate.ts
 // Amazon Translate integration for Sentinel's Regional Mentorship Hub
 // Translates architectural feedback into Hindi, Tamil, and Telugu
 // Making senior-level code mentorship accessible to every Indian developer
@@ -8,8 +8,8 @@ import {
   TranslateTextCommand,
   TranslateTextCommandInput,
 } from "@aws-sdk/client-translate";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────
 // SUPPORTED LANGUAGES

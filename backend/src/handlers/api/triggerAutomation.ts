@@ -1,4 +1,4 @@
-/**
+﻿/**
  * triggerAutomation.ts
  * Velocis — POST /repos/:repoId/trigger-automation
  *
@@ -19,17 +19,17 @@ import {
     type ConverseCommandInput,
 } from "@aws-sdk/client-bedrock-runtime";
 import { ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
-import { repoOps } from "../../services/github/repoOps";
-import { generateQATestPlan } from "../../functions/fortress/analyzeFortress";
-import { generateIac, type IacGenerationResult } from "../../functions/predictor/generateIac";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
+import { repoOps } from "../../services/github/repoOps.js";
+import { generateQATestPlan } from "../../functions/fortress/analyzeFortress.js";
+import { generateIac, type IacGenerationResult } from "../../functions/predictor/generateIac.js";
 import {
     predictInfrastructureFromCodeContent,
     type InfrastructurePredictionData,
-} from "./predictInfrastructure";
+} from "./predictInfrastructure.js";
 import axios from "axios";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
@@ -349,7 +349,7 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
             const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
             const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
                 tableName: DYNAMO_TABLES.USERS,
-                key: { githubId: `session_${hash}` },
+                key: { userId: `session_${hash}` },
             });
             if (session && new Date(session.expiresAt) > new Date()) {
                 let githubToken = "";
@@ -359,7 +359,7 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
                     try {
                         const u = await dynamoClient.get<{ accessToken?: string; github_token?: string }>({
                             tableName: DYNAMO_TABLES.USERS,
-                            key: { githubId: session.githubId },
+                            key: { userId: session.githubId },
                         });
                         githubToken = u?.accessToken ?? u?.github_token ?? "";
                     } catch { /* non-fatal */ }

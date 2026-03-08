@@ -1,4 +1,4 @@
-/**
+﻿/**
  * mentorChat.ts
  * Velocis — Sentinel: The Guardian & Multilingual Mentor Agent
  *
@@ -68,19 +68,19 @@ import {
   UpdateCommand,
   DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
-import { fetchFileContent } from "../../services/github/repoOps";
-import { translateText } from "../../services/aws/translate";
-import { invokeClaude } from "../../services/aws/bedrockClient";
-import { analyzeLogic } from "./analyzeLogic";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
+import { fetchFileContent } from "../../services/github/repoOps.js";
+import { translateText } from "../../services/aws/translate.js";
+import { invokeClaude } from "../../services/aws/bedrockClient.js";
+import { analyzeLogic } from "./analyzeLogic.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor.js";
 import type {
   SupportedLanguage,
   ReviewFinding,
   CodeReviewResult,
-} from "./analyzeLogic";
+} from "./analyzeLogic.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * initCortexTables.ts
  * Velocis — DynamoDB Table Initialization (ALL tables)
  *
@@ -18,7 +18,7 @@ import {
   ResourceNotFoundException,
   type CreateTableCommandInput,
 } from "@aws-sdk/client-dynamodb";
-import { logger } from "../utils/logger";
+import { logger } from "../utils/logger.js";
 
 const dynamoClient = new DynamoDBClient({
   region: process.env.AWS_REGION ?? "us-east-1",
@@ -259,11 +259,9 @@ const TABLES: CreateTableCommandInput[] = [
   // ── Workspace chat history ────────────────────────────────────────────────
   {
     TableName: process.env.CHAT_TABLE ?? "velocis-workspace-chat",
-    // Partition key must be `messageId` — matches the PutCommand in sendChatMessage
-    // and the WorkspaceChatTable definition in template.yaml.
-    KeySchema: [{ AttributeName: "messageId", KeyType: "HASH" }],
+    KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
     AttributeDefinitions: [
-      { AttributeName: "messageId", AttributeType: "S" },
+      { AttributeName: "id", AttributeType: "S" },
       { AttributeName: "repoId", AttributeType: "S" },
     ],
     GlobalSecondaryIndexes: [
@@ -334,5 +332,4 @@ if (require.main === module) {
 export const createCortexTable = async () => {};
 export const createTimelineTable = async () => {};
 export { main as initAllTables };
-
 

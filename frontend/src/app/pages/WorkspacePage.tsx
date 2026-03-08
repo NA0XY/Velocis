@@ -186,7 +186,6 @@ export function WorkspacePage() {
   const [commitMessage, setCommitMessage] = useState('');
   const [pushAuthError, setPushAuthError] = useState('');
   const [installAppUrl, setInstallAppUrl] = useState('');
-  const [pendingInjection, setPendingInjection] = useState<{ filePath: string; fixedCode: string } | null>(null);
 
   // Dark mode state
   const { isDarkMode, setIsDarkMode } = useTheme();
@@ -442,64 +441,7 @@ export function WorkspacePage() {
         context: { file_path: selectedFile, ref: selectedBranch || 'main' },
         language,
       });
-      // Derive autoFix: try in order —
-      //   1. Backend-parsed auto_fix (XML SENTINEL_FILE format fully parsed server-side)
-      //   2. Client-side XML <SENTINEL_FILE> extraction (when backend forwarded raw output)
-      //   3. Largest fenced code block fallback (markdown ``` blocks)
-      let derivedAutoFix: { filePath: string; reason: string; fixedCode: string } | undefined;
-      let rawTextContent = res.content ?? '';
-
-      if (res.auto_fix?.file_path && res.auto_fix.fixed_code?.trim().length > 10) {
-        // ── Path 1: structured auto_fix from backend ──────────────────────────
-        derivedAutoFix = {
-          filePath: res.auto_fix.file_path,
-          reason: res.auto_fix.reason ?? '',
-          fixedCode: res.auto_fix.fixed_code,
-        };
-      } else {
-        // ── Path 2: client-side XML extraction ───────────────────────────────
-        const xmlFileMatch = rawTextContent.match(
-          /<SENTINEL_FILE\s+path=["']([^"']+)["'][^>]*>([\s\S]*?)<\/SENTINEL_FILE>/i
-        );
-        if (xmlFileMatch) {
-          const xmlFilePath = xmlFileMatch[1].trim() || selectedFile || 'unknown';
-          const xmlCode = xmlFileMatch[2].replace(/^\n/, '').replace(/\n$/, '').trim();
-          if (xmlCode.length > 10) {
-            derivedAutoFix = {
-              filePath: xmlFilePath,
-              reason: rawTextContent.match(/<SENTINEL_REPLY>([\s\S]*?)<\/SENTINEL_REPLY>/i)?.[1]?.trim() || 'Sentinel generated code',
-              fixedCode: xmlCode,
-            };
-            rawTextContent = rawTextContent
-              .replace(/<SENTINEL_REPLY>[\s\S]*?<\/SENTINEL_REPLY>/i, '')
-              .replace(/<SENTINEL_FILE[\s\S]*?<\/SENTINEL_FILE>/i, '')
-              .replace(/\n{3,}/g, '\n\n').trim();
-          }
-        }
-
-        // ── Path 3: fenced code block fallback ───────────────────────────────
-        if (!derivedAutoFix) {
-          const fenceRe = /```(?:[\w.-]*)?\n?([\s\S]*?)```/g;
-          const blocks: string[] = [];
-          let fm: RegExpExecArray | null;
-          while ((fm = fenceRe.exec(rawTextContent)) !== null) {
-            if (fm[1]?.trim().length > 20) blocks.push(fm[1]);
-          }
-          const largest = blocks.sort((a, b) => b.length - a.length)[0];
-          if (largest) {
-            derivedAutoFix = {
-              filePath: selectedFile || 'unknown',
-              reason: 'Sentinel generated code',
-              fixedCode: largest.trim(),
-            };
-            rawTextContent = rawTextContent
-              .replace(/```[\w.-]*\n?[\s\S]*?```/g, '')
-              .replace(/\n{3,}/g, '\n\n').trim();
-          }
-        }
-      }
-
-      let replyContent = rawTextContent;
+      let replyContent = res.content;
       if (language !== 'en' && replyContent) {
         replyContent = await translateText(replyContent, language);
       }
@@ -526,14 +468,14 @@ export function WorkspacePage() {
             fixSuggestion: f.fix_suggestion,
           })),
         } : undefined,
-        autoFix: derivedAutoFix,
-        autoFixApplied: false,
+        autoFix: res.auto_fix ? {
+          filePath: res.auto_fix.file_path,
+          reason: res.auto_fix.reason,
+          fixedCode: res.auto_fix.fixed_code,
+        } : undefined,
+        autoFixApplied: !!res.auto_fix,
         timestamp: res.timestamp_ago,
       };
-      // Surface the pending injection in the header button
-      if (derivedAutoFix) {
-        setPendingInjection({ filePath: derivedAutoFix.filePath, fixedCode: derivedAutoFix.fixedCode });
-      }
       setMessages(prev => {
         const updated = [...prev, reply];
         try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
@@ -541,6 +483,25 @@ export function WorkspacePage() {
       });
       setAllHistoryMessages(prev => [...prev, reply]);
 
+      // Auto-apply edit responses directly into the editor.
+      if (reply.autoFix?.filePath && reply.autoFix.fixedCode) {
+        const fixedPath = reply.autoFix.filePath;
+        setSelectedFile(fixedPath);
+        setCodeContent(reply.autoFix.fixedCode);
+        setAnnotations([]);
+        setEditedFiles(prev => ({ ...prev, [fixedPath]: reply.autoFix!.fixedCode }));
+
+        if (!allFiles.some(f => f.path === fixedPath)) {
+          setAllFiles(prev => [
+            ...prev,
+            {
+              name: fixedPath.split('/').pop() || fixedPath,
+              type: 'file',
+              path: fixedPath,
+            },
+          ]);
+        }
+      }
     } catch {
       setMessages(prev => [...prev, { role: 'sentinel', content: 'Failed to get response. Please try again.', timestamp: 'Just now' }]);
     } finally {
@@ -602,14 +563,10 @@ export function WorkspacePage() {
     const fix = message?.autoFix;
     if (!fix) return;
 
-    const targetPath = selectedFile || fix.filePath;
-    const ext = targetPath.split('.').pop()?.toLowerCase() ?? '';
-    const commentChar = ['py', 'rb', 'sh', 'bash', 'yaml', 'yml', 'toml'].includes(ext) ? '#' : '//';
-    const newContent = `${codeContent.trimEnd()}\n\n${commentChar} sentinel generated\n${fix.fixedCode.trim()}\n`;
-
-    setCodeContent(newContent);
+    setSelectedFile(fix.filePath);
+    setCodeContent(fix.fixedCode);
     setAnnotations([]);
-    setEditedFiles(prev => ({ ...prev, [targetPath]: newContent }));
+    setEditedFiles(prev => ({ ...prev, [fix.filePath]: fix.fixedCode }));
 
     if (!allFiles.some(f => f.path === fix.filePath)) {
       setAllFiles(prev => [
@@ -627,49 +584,11 @@ export function WorkspacePage() {
     )));
   };
 
-  const handleInjectCode = (fixOverride?: { filePath: string; fixedCode: string }, messageIndex?: number) => {
-    const fix = fixOverride ?? pendingInjection;
-    if (!fix) return;
-
-    const targetPath = selectedFile || fix.filePath;
-    const ext = targetPath.split('.').pop()?.toLowerCase() ?? '';
-    const commentChar = ['py', 'rb', 'sh', 'bash', 'yaml', 'yml', 'toml'].includes(ext) ? '#' : '//';
-    const newContent = `${codeContent.trimEnd()}\n\n${commentChar} sentinel generated\n${fix.fixedCode.trim()}\n`;
-
-    setCodeContent(newContent);
-    if (targetPath) {
-      setEditedFiles(prev => ({ ...prev, [targetPath]: newContent }));
-    }
-    setPendingInjection(null);
-
-    if (messageIndex !== undefined) {
-      setMessages(prev => {
-        const updated = prev.map((m, idx) =>
-          idx === messageIndex ? { ...m, autoFixApplied: true } : m
-        );
-        try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
-        return updated;
-      });
-    } else {
-      // Mark the most recent message with autoFix as applied
-      setMessages(prev => {
-        let found = false;
-        const updated = [...prev].reverse().map(m => {
-          if (!found && m.autoFix && !m.autoFixApplied) { found = true; return { ...m, autoFixApplied: true }; }
-          return m;
-        }).reverse();
-        try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
-        return updated;
-      });
-    }
-  };
-
   // annotations come from API state (set in useEffect above)
 
   const handleNewChat = () => {
     setMessages([]);
     setIsHistoryOpen(false);
-    setPendingInjection(null);
     try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: [] })); } catch { }
   };
 
@@ -1093,31 +1012,16 @@ export function WorkspacePage() {
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 w-full">
-                  <button
-                    onClick={() => handleInjectCode()}
-                    disabled={!pendingInjection}
-                    title={pendingInjection ? `Inject into ${(pendingInjection.filePath.split('/').pop())}` : 'No code to inject yet'}
-                    className={`cta-btn flex-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                      pendingInjection
-                        ? 'bg-zinc-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-zinc-800 dark:hover:bg-white shadow-sm'
-                        : 'bg-zinc-100 text-zinc-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed opacity-60'
-                    }`}
-                  >
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>Inject</span>
-                  </button>
-                  <button
-                    id="workspace-review-btn"
-                    onClick={handleReviewCode}
-                    disabled={isReviewing || !id}
-                    className="cta-btn flex-1 min-w-[110px] px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5"
-                    style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>{isReviewing ? 'Reviewing...' : 'Review Code'}</span>
-                  </button>
-                </div>
+                <button
+                  id="workspace-review-btn"
+                  onClick={handleReviewCode}
+                  disabled={isReviewing || !id}
+                  className="cta-btn w-full min-w-[110px] px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5"
+                  style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{isReviewing ? 'Reviewing...' : 'Review Code'}</span>
+                </button>
               </div>
             </div>
 
@@ -1312,44 +1216,8 @@ export function WorkspacePage() {
                               </button>
                             </div>
                           </div>
-                        ) : message.autoFix && !message.autoFixApplied ? (
-                          /* Code Preview Card — show generated code in chat, let user inject */
-                          <div className="w-full space-y-2">
-                            {message.content && (
-                              <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-zinc-100/80 dark:border-slate-700/80 transition-colors">
-                                <p className="text-[13px] text-zinc-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
-                                  {message.content}
-                                </p>
-                              </div>
-                            )}
-                            <div className="bg-indigo-50/60 dark:bg-slate-800/90 border border-indigo-200/60 dark:border-indigo-500/20 rounded-xl overflow-hidden shadow-sm transition-colors">
-                              {/* Code preview header */}
-                              <div className="flex items-center justify-between px-3.5 py-2 border-b border-indigo-100/70 dark:border-slate-700/60">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <FileCode className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0" />
-                                  <span className="text-[11px] font-semibold text-zinc-700 dark:text-slate-300 font-['JetBrains_Mono',_monospace] truncate">
-                                    {message.autoFix.filePath.split('/').pop()}
-                                  </span>
-                                </div>
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-100/80 dark:bg-indigo-500/20 px-2 py-0.5 rounded shrink-0 ml-2">
-                                  Preview
-                                </span>
-                              </div>
-                              {/* Scrollable code block */}
-                              <pre className="px-3.5 py-2.5 text-[11px] font-['JetBrains_Mono',_monospace] text-zinc-700 dark:text-slate-300 overflow-x-auto max-h-[200px] overflow-y-auto leading-relaxed scrollbar-thin scrollbar-thumb-zinc-200 dark:scrollbar-thumb-slate-700 whitespace-pre-wrap break-all">
-                                {message.autoFix.fixedCode.length > 900
-                                  ? `${message.autoFix.fixedCode.slice(0, 900)}\n// ...`
-                                  : message.autoFix.fixedCode}
-                              </pre>
-                              <div className="px-3.5 py-2 border-t border-indigo-100/70 dark:border-slate-700/60">
-                                <p className="text-[10px] text-indigo-500 dark:text-indigo-400 font-medium text-center">
-                                  Click <span className="font-bold">Inject</span> in the panel header to insert this code
-                                </p>
-                              </div>
-                            </div>
-                          </div>
                         ) : message.autoFix && message.autoFixApplied ? (
-                          /* Code Injected Confirmation Card */
+                          /* File Edit Applied Card */
                           <div className="w-full space-y-2">
                             {message.content && (
                               <div className="bg-white dark:bg-slate-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-[0_2px_10px_rgba(0,0,0,0.03)] border border-zinc-100/80 dark:border-slate-700/80 transition-colors">
@@ -1364,7 +1232,7 @@ export function WorkspacePage() {
                                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                                 </div>
                                 <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                                  Code Injected
+                                  File Updated
                                 </span>
                               </div>
                               <div className="px-3.5 py-2.5 flex items-center justify-between gap-3">

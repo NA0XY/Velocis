@@ -1,4 +1,4 @@
-// src/handlers/api/deleteRepo.ts
+﻿// src/handlers/api/deleteRepo.ts
 // DELETE /api/repos/:repoId
 //
 // Removes a repo record from the REPOSITORIES table.
@@ -7,9 +7,9 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { ok, errors, preflight } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { ok, errors, preflight } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
 
 export const handler = async (
   event: APIGatewayProxyEvent

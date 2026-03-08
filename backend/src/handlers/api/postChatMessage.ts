@@ -1,4 +1,4 @@
-/**
+﻿/**
  * postChatMessage.ts
  * AWS Lambda Handler — Sentinel Vibe Coding Workspace
  *
@@ -49,21 +49,21 @@ import { randomUUID } from "crypto";
 // logging, error handling, and testability.
 // ─────────────────────────────────────────────
 
-import { config } from "../../utils/config";
-import { logger } from "../../utils/logger";
+import { config } from "../../utils/config.js";
+import { logger } from "../../utils/logger.js";
 import {
   invokeClaude as centralInvokeClaude,
   invokeClaudeStream,
   BEDROCK_MODELS,
   BedrockMessage,
-} from "../../services/aws/bedrockClient";
-import { translateText } from "../../services/aws/translate";
-import { logActivity } from "../../utils/activityLogger";
+} from "../../services/aws/bedrockClient.js";
+import { translateText } from "../../services/aws/translate.js";
+import { logActivity } from "../../utils/activityLogger.js";
 import {
   dynamoClient as dynamo,
   DYNAMO_TABLES,
   DynamoTableName,
-} from "../../services/database/dynamoClient";
+} from "../../services/database/dynamoClient.js";
 
 // ─────────────────────────────────────────────
 // Types & Interfaces

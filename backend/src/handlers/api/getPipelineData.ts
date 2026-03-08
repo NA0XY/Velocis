@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getPipelineData.ts
  * Velocis — Fortress Agent / Pipeline Handlers
  *
@@ -24,16 +24,16 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { logActivity } from "../../utils/activityLogger";
-import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress";
-import { repoOps, getInstallationToken, fetchFileContent } from "../../services/github/repoOps";
-import { getUserToken } from "../../services/github/auth";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { logActivity } from "../../utils/activityLogger.js";
+import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress.js";
+import { repoOps, getInstallationToken, fetchFileContent } from "../../services/github/repoOps.js";
+import { getUserToken } from "../../services/github/auth.js";
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const PIPELINE_TABLE = process.env.PIPELINE_TABLE ?? "velocis-pipeline-runs";
 const REPOS_TABLE = config.DYNAMO_REPOSITORIES_TABLE;
@@ -70,13 +70,13 @@ async function requireAuth(
   const sessionHash = createHash("sha256").update(sessionToken).digest("hex");
   try {
     const res = await dynamo.send(
-      new GetCommand({ TableName: USERS_TABLE, Key: { githubId: `session_${sessionHash}` } })
+      new GetCommand({ TableName: USERS_TABLE, Key: { userId: `session_${sessionHash}` } })
     );
     const rec = res.Item;
     if (!rec) return null;
     if (new Date(rec.expiresAt) < new Date()) return null;
-    // Return userId as the userId — matches userId written by Fortress pipeline etc.
-    return rec.userId ?? rec.githubId ?? rec.userLogin ?? `session_${sessionHash}`;
+    // Return githubId as the userId — matches userId written by Fortress pipeline etc.
+    return rec.githubId ?? rec.userLogin ?? `session_${sessionHash}`;
   } catch {
     return null;
   }
@@ -328,7 +328,7 @@ async function executeFortressPipeline(args: {
     } else {
       // installRepo records don't store repoOwner — look up the user's GitHub username
       const userRes = await dynamo.send(
-        new GetCommand({ TableName: USERS_TABLE, Key: { githubId: userId } })
+        new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
       );
       repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
     }
@@ -655,7 +655,7 @@ export const postQAPlan = async (
     repoOwner = repoRecord.repoOwner;
   } else {
     const userRes = await dynamo.send(
-      new GetCommand({ TableName: USERS_TABLE, Key: { githubId: userId } })
+      new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
     );
     repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
   }
@@ -863,7 +863,7 @@ export const postApiDocs = async (
     } else if (repoRecord.repoOwner) {
       repoOwner = repoRecord.repoOwner;
     } else {
-      const userRes = await dynamo.send(new GetCommand({ TableName: USERS_TABLE, Key: { githubId: userId } }));
+      const userRes = await dynamo.send(new GetCommand({ TableName: USERS_TABLE, Key: { userId } }));
       repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
     }
 

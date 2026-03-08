@@ -1,4 +1,4 @@
-// src/services/aws/bedrockClient.ts
+﻿// src/services/aws/bedrockClient.ts
 // Centralized LLM orchestration for all three Velocis agents
 // All Bedrock calls flow through here — no agent talks to Bedrock directly
 // Handles: Amazon Nova Pro 1.0 (Sentinel), Llama 3 (Fortress), Titan Embeddings (RAG)
@@ -9,8 +9,8 @@ import {
   InvokeModelWithResponseStreamCommand,
   InvokeModelCommandInput,
 } from "@aws-sdk/client-bedrock-runtime";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────
 // MODEL IDs

@@ -1,10 +1,10 @@
-// src/utils/logger.ts
+﻿// src/utils/logger.ts
 // Structured logging for all Velocis Lambda functions and services
 // Built on Pino — the fastest JSON logger for Node.js
 // Integrates with AWS Lambda Powertools for CloudWatch metrics + tracing
 
 import pino, { Logger, LoggerOptions, TransportTargetOptions } from "pino";
-import { config, isLambda, isTest, isProduction, isDevelopment } from "./config";
+import { config, isLambda, isTest, isProduction, isDevelopment } from "./config.js";
 
 // ─────────────────────────────────────────────
 // TYPES

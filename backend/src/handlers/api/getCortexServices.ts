@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getCortexServices.ts
  * Velocis — Cortex Agent Service Map Handlers
  *
@@ -20,12 +20,12 @@ import {
   GetCommand,
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
 
 import * as crypto from "crypto";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
 
 const dynamo = getDocClient();
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
@@ -56,7 +56,7 @@ async function requireAuth(event: APIGatewayProxyEvent): Promise<string | null> 
         expiresAt: string;
       }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${sessionTokenHash}` },
+        key: { userId: `session_${sessionTokenHash}` },
       });
 
       if (sessionRecord && new Date(sessionRecord.expiresAt) > new Date()) {

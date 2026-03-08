@@ -1,4 +1,4 @@
-/**
+﻿/**
  * generateIac.ts
  * Velocis — IaC Predictor (Infrastructure as Code)
  *
@@ -49,11 +49,11 @@ import {
   type Filter,
 } from "@aws-sdk/client-pricing";
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
-import { fetchFileContent } from "../../services/github/repoOps";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
+import { fetchFileContent } from "../../services/github/repoOps.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { stripCodeFences as stripMarkdownCodeBlocks } from "../../utils/codeExtractor.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES

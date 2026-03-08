@@ -1,4 +1,4 @@
-// src/handlers/api/authGithub.ts
+﻿// src/handlers/api/authGithub.ts
 // Lambda handler: GET /api/auth/github
 //
 // Entry point for the GitHub OAuth login flow.
@@ -8,9 +8,9 @@
 // This handler does NOT require authentication — it is the first step in login.
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { initOAuthFlow } from "../../services/github/auth";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { initOAuthFlow } from "../../services/github/auth.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 export const handler = async (
     event: APIGatewayProxyEvent

@@ -1,10 +1,10 @@
-// src/middlewares/verifySignature.ts
+﻿// src/middlewares/verifySignature.ts
 // Cryptographic verification of incoming GitHub webhook signatures
 // GitHub signs every payload with HMAC-SHA256 using your webhook secret
 // We MUST verify this before processing anything — prevents spoofed webhooks
 
 import * as crypto from "crypto";
-import { logger } from "../utils/logger";
+import { logger } from "../utils/logger.js";
 
 // ─────────────────────────────────────────────
 // TYPES

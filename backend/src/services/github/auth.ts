@@ -1,15 +1,12 @@
-// src/services/github/auth.ts
+﻿// src/services/github/auth.ts
 // GitHub OAuth and GitHub App authentication for Velocis
 // Handles: OAuth flow, token exchange, installation tokens, token refresh
 // Two auth modes: OAuth App (user login) + GitHub App (repo installation)
 
-import { createAppAuth } from "@octokit/auth-app";
-import { createOAuthAppAuth } from "@octokit/auth-oauth-app";
-import { Octokit } from "@octokit/rest";
 import * as crypto from "crypto";
-import { dynamoClient, DYNAMO_TABLES } from "../database/dynamoClient";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { dynamoClient, DYNAMO_TABLES } from "../database/dynamoClient.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────
 // TYPES
@@ -101,17 +98,22 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 // ─────────────────────────────────────────────
 
 // Unauthenticated client — for public API calls only
-const publicOctokit = new Octokit();
+async function getPublicOctokit() {
+  const { Octokit } = await import("@octokit/rest");
+  return new Octokit();
+}
 
 // App-level authenticated client — for installation token generation
 // Only available when GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are configured.
-function getAppOctokit(): Octokit {
+async function getAppOctokit() {
   if (!config.GITHUB_APP_ID || !config.GITHUB_APP_PRIVATE_KEY) {
     throw new GitHubAuthError(
       "GitHub App credentials (GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY) are not configured. " +
       "App-level features like installation tokens are unavailable."
     );
   }
+  const { Octokit } = await import("@octokit/rest");
+  const { createAppAuth } = await import("@octokit/auth-app");
   return new Octokit({
     authStrategy: createAppAuth,
     auth: {
@@ -124,7 +126,8 @@ function getAppOctokit(): Octokit {
 }
 
 // User-authenticated client — scoped to a specific user's access token
-function getUserOctokit(accessToken: string): Octokit {
+async function getUserOctokit(accessToken: string) {
+  const { Octokit } = await import("@octokit/rest");
   return new Octokit({ auth: accessToken });
 }
 
@@ -259,7 +262,7 @@ export async function handleOAuthCallback(
   }
 
   // ── Fetch GitHub User Profile ─────────────────────────────────────────────
-  const userOctokit = getUserOctokit(accessToken);
+  const userOctokit = await getUserOctokit(accessToken);
   const { data: githubUser } = await userOctokit.users.getAuthenticated();
 
   logger.info({
@@ -283,8 +286,8 @@ export async function handleOAuthCallback(
 
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
-    item: { ...storedToken, githubId: storedToken.userId } as unknown as Record<string, unknown>,
-    key: "githubId",
+    item: storedToken as unknown as Record<string, unknown>,
+    key: "userId",
   });
 
   return {
@@ -337,7 +340,7 @@ export async function getInstallationToken(
   });
 
   try {
-    const appOctokit = getAppOctokit();
+    const appOctokit = await getAppOctokit();
     const { data } = await appOctokit.apps.createInstallationAccessToken({
       installation_id: installationId,
     });
@@ -381,7 +384,7 @@ export async function getInstallationTokenForRepo(
   owner: string,
   repo: string
 ): Promise<string> {
-  const appOctokit = getAppOctokit();
+  const appOctokit = await getAppOctokit();
   const { data } = await appOctokit.apps.getRepoInstallation({ owner, repo });
   return getInstallationToken(data.id);
 }
@@ -395,7 +398,7 @@ let _cachedAppSlug: string | null = null;
  */
 export async function getAppInstallUrl(): Promise<string> {
   if (!_cachedAppSlug) {
-    const { data } = await getAppOctokit().apps.getAuthenticated();
+    const { data } = await (await getAppOctokit()).apps.getAuthenticated();
     _cachedAppSlug = (data as any).slug ?? '';
   }
   return `https://github.com/apps/${_cachedAppSlug}/installations/new`;
@@ -416,7 +419,7 @@ export async function getAppInstallUrl(): Promise<string> {
 export async function getUserToken(userId: string): Promise<string> {
   const stored = await dynamoClient.get<StoredUserToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: userId },
+    key: { userId },
   });
 
   if (!stored) {
@@ -443,7 +446,7 @@ export async function getUserToken(userId: string): Promise<string> {
 export async function revokeUserToken(userId: string): Promise<void> {
   const stored = await dynamoClient.get<StoredUserToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: userId },
+    key: { userId },
   });
 
   if (!stored) {
@@ -458,7 +461,7 @@ export async function revokeUserToken(userId: string): Promise<void> {
 
   // Revoke at GitHub's end
   try {
-    await publicOctokit.request(
+    await (await getPublicOctokit()).request(
       "DELETE /applications/{client_id}/token",
       {
         client_id: config.GITHUB_CLIENT_ID,
@@ -487,7 +490,7 @@ export async function revokeUserToken(userId: string): Promise<void> {
   // Delete from DynamoDB
   await dynamoClient.remove({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: userId },
+    key: { userId },
   });
 
   logger.info({
@@ -512,7 +515,7 @@ export async function revokeUserToken(userId: string): Promise<void> {
 export async function validateUserToken(userId: string): Promise<boolean> {
   try {
     const token = await getUserToken(userId);
-    const octokit = getUserOctokit(token);
+    const octokit = await getUserOctokit(token);
     await octokit.users.getAuthenticated();
     return true;
   } catch {
@@ -536,20 +539,20 @@ async function storeCsrfState(state: string): Promise<void> {
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
     item: {
-      githubId: `csrf_${state}`,  // Namespaced to avoid collision with real users
+      userId: `csrf_${state}`,    // Namespaced to avoid collision with real users
       state,
       type: "csrf",
       expiresAt: new Date(Date.now() + STATE_TTL_MS).toISOString(),
       ttl: Math.floor((Date.now() + STATE_TTL_MS) / 1000),
     },
-    key: "githubId",
+    key: "userId",
   });
 }
 
 async function validateAndConsumeCsrfState(state: string): Promise<void> {
   const record = await dynamoClient.get<{ expiresAt: string }>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: `csrf_${state}` },
+    key: { userId: `csrf_${state}` },
     consistentRead: true,   // Must be strongly consistent — state was just written milliseconds ago
   });
 
@@ -564,7 +567,7 @@ async function validateAndConsumeCsrfState(state: string): Promise<void> {
   // Consume: delete immediately — one-time use only
   await dynamoClient.remove({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: `csrf_${state}` },
+    key: { userId: `csrf_${state}` },
   });
 }
 
@@ -577,7 +580,7 @@ async function getCachedInstallationToken(
 ): Promise<StoredInstallationToken | null> {
   return dynamoClient.get<StoredInstallationToken>({
     tableName: DYNAMO_TABLES.USERS,
-    key: { githubId: `installation_${installationId}` },
+    key: { userId: `installation_${installationId}` },
   });
 }
 
@@ -589,7 +592,7 @@ async function cacheInstallationToken(
   await dynamoClient.upsert({
     tableName: DYNAMO_TABLES.USERS,
     item: {
-      githubId: `installation_${tokenResult.installationId}`,
+      userId: `installation_${tokenResult.installationId}`,
       installationId: tokenResult.installationId,
       token: encryptedToken,
       expiresAt: tokenResult.expiresAt,
@@ -599,7 +602,7 @@ async function cacheInstallationToken(
       ttl: Math.floor(new Date(tokenResult.expiresAt).getTime() / 1000),
       createdAt: new Date().toISOString(),
     },
-    key: "githubId",
+    key: "userId",
   });
 }
 
@@ -686,6 +689,7 @@ export async function verifyRepoAccess(
   name: string,
   accessToken: string
 ): Promise<boolean> {
+  const { Octokit } = await import("@octokit/rest");
   const octokit = new Octokit({ auth: accessToken });
   try {
     await octokit.repos.get({ owner, repo: name });

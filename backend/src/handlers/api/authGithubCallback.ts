@@ -1,4 +1,4 @@
-// src/handlers/api/authGithubCallback.ts
+﻿// src/handlers/api/authGithubCallback.ts
 // Lambda handler: GET /api/auth/github/callback
 //
 // Step 2 of the GitHub OAuth flow.
@@ -15,11 +15,11 @@
 // Tokens are NEVER returned to the frontend — only a session cookie is set.
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { handleOAuthCallback } from "../../services/github/auth";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { User } from "../../models/interfaces/User";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { handleOAuthCallback } from "../../services/github/auth.js";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
+import { User } from "../../models/interfaces/User.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 import * as crypto from "crypto";
 
 // ─────────────────────────────────────────────
@@ -111,7 +111,7 @@ export const handler = async (
         // Fetch existing user to preserve createdAt and plan
         const existingUser = await dynamoClient.get<User>({
             tableName: DYNAMO_TABLES.USERS,
-            key: { githubId: tokenResult.userId },
+            key: { userId: tokenResult.userId },
         });
 
         const userRecord: Record<string, unknown> = {
@@ -151,14 +151,14 @@ export const handler = async (
             dynamoClient.upsert({
                 tableName: DYNAMO_TABLES.USERS,
                 item: userRecord,
-                key: "githubId",
+                key: "userId",
             }),
-            // Store session hash in DynamoDB (keyed by githubId, namespaced with prefix)
+            // Store session hash in DynamoDB (keyed by userId, namespaced with prefix)
             dynamoClient.upsert({
                 tableName: DYNAMO_TABLES.USERS,
                 item: {
-                    githubId: `session_${sessionTokenHash}`,  // Namespaced session record
-                    userId: tokenResult.userId,
+                    userId: `session_${sessionTokenHash}`,  // Namespaced session record
+                    githubId: tokenResult.userId,
                     userLogin: tokenResult.userLogin,
                     type: "session",
                     expiresAt: sessionExpiresAt,
@@ -166,7 +166,7 @@ export const handler = async (
                     createdAt: now,
                     updatedAt: now,
                 },
-                key: "githubId",
+                key: "userId",
             }),
         ]);
 
@@ -188,12 +188,10 @@ export const handler = async (
             ...(isProduction ? ["Secure"] : []),
         ].join("; ");
 
-        // SameSite=None;Secure is required for cross-site fetch requests
-        // (frontend on Amplify domain → API on Lambda URL domain)
         const sessionCookie = [
             `velocis_session=${sessionToken}`,
             "HttpOnly",
-            isProduction ? "SameSite=None" : "SameSite=Lax",
+            "SameSite=Lax",
             `Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}`,
             "Path=/",
             ...(isProduction ? ["Secure"] : []),

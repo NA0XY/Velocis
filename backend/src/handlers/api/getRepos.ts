@@ -1,4 +1,4 @@
-// src/handlers/api/getRepos.ts
+﻿// src/handlers/api/getRepos.ts
 // GET /api/repos
 //
 // Returns the authenticated user's GitHub repositories for the onboarding page.
@@ -6,10 +6,10 @@
 // retrieves & decrypts the stored GitHub token → calls GitHub API → returns repos.
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 import * as crypto from "crypto";
 
 export const handler = async (
@@ -51,7 +51,7 @@ export const handler = async (
             expiresAt: string;
         }>({
             tableName: DYNAMO_TABLES.USERS,
-            key: { githubId: `session_${sessionTokenHash}` },
+            key: { userId: `session_${sessionTokenHash}` },
         });
 
         if (!sessionRecord) {
@@ -70,10 +70,10 @@ export const handler = async (
             };
         }
 
-        const { userId, userLogin } = sessionRecord;
+        const { githubId, userLogin } = sessionRecord;
 
         // ── Fetch decrypted token & call GitHub API ────────────────────────────
-        const accessToken = await getUserToken(userId);
+        const accessToken = await getUserToken(githubId);
 
         // Fetch up to 100 repos (sorted by most recently updated)
         const reposResponse = await fetch(
@@ -120,7 +120,7 @@ export const handler = async (
                 tableName: DYNAMO_TABLES.REPOSITORIES,
                 indexName: "userId-index",
                 keyConditionExpression: "ownerGithubId = :ownerGithubId",
-                expressionAttributeValues: { ":ownerGithubId": userId },
+                expressionAttributeValues: { ":ownerGithubId": githubId },
             });
 
             if (installedRepos && installedRepos.items.length > 0) {
@@ -156,7 +156,7 @@ export const handler = async (
         logger.info({
             msg: "getRepos: success",
             requestId,
-            userId: userId,
+            userId: githubId,
             login: userLogin,
             repoCount: result.length,
             installedCount: installedReposMap.size,

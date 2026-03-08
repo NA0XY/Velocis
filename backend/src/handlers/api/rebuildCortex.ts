@@ -1,17 +1,17 @@
-/**
+﻿/**
  * rebuildCortex.ts
  * Manual endpoint to rebuild Cortex graph for a repository
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { buildCortexGraph } from "../../functions/cortex/graphBuilder";
-import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
+import { buildCortexGraph } from "../../functions/cortex/graphBuilder.js";
+import { syncCortexServices } from "../../functions/cortex/syncCortexServices.js";
 import { DynamoDBDocumentClient, ScanCommand, DeleteCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
-import { getDocClient, dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { getUserToken, getInstallationToken } from "../../services/github/auth";
-import { logger } from "../../utils/logger";
-import { ok, errors } from "../../utils/apiResponse";
-import { config } from "../../utils/config";
+import { getDocClient, dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
+import { getUserToken, getInstallationToken } from "../../services/github/auth.js";
+import { logger } from "../../utils/logger.js";
+import { ok, errors } from "../../utils/apiResponse.js";
+import { config } from "../../utils/config.js";
 import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import * as crypto from "crypto";
 
@@ -55,7 +55,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       expiresAt: string;
     }>({
       tableName: DYNAMO_TABLES.USERS,
-      key: { githubId: `session_${sessionTokenHash}` },
+      key: { userId: `session_${sessionTokenHash}` },
     });
 
     logger.info({ found: !!sessionRecord, userId: sessionRecord?.userId }, 'Session record lookup result');
@@ -111,7 +111,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       // Fallback: resolve owner from the USERS_TABLE using the githubId
       logger.info({ repoId, githubId: sessionRecord.githubId }, 'Resolving owner from USERS_TABLE');
       try {
-        const userRes = await docClient.send(new GetCommand({ TableName: DYNAMO_TABLES.USERS, Key: { githubId: sessionRecord.githubId } }));
+        const userRes = await docClient.send(new GetCommand({ TableName: DYNAMO_TABLES.USERS, Key: { userId: sessionRecord.githubId } }));
         owner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
 
         if (!owner) {

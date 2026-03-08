@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getGithubRepos.ts
  * Velocis — GET /github/repos
  *
@@ -16,10 +16,10 @@ import * as jwt from "jsonwebtoken";
 import axios from "axios";
 import { DynamoDBDocumentClient, GetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
 
-const dynamo       = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
+const dynamo       = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const JWT_SECRET   = process.env.JWT_SECRET   ?? "changeme-in-production";
 const USERS_TABLE  = process.env.USERS_TABLE  ?? "velocis-users";
 const INSTALL_TABLE = process.env.INSTALL_TABLE ?? "velocis-installations";

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getAutomationReport.ts
  * Velocis — GET /repos/:repoId/automation-report
  * Returns the automationReport stored on the repo document by triggerAutomation.ts.
@@ -8,10 +8,10 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -32,22 +32,22 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
             const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
             const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
                 tableName: DYNAMO_TABLES.USERS,
-                key: { githubId: `session_${hash}` },
+                key: { userId: `session_${hash}` },
             });
             if (session && new Date(session.expiresAt) > new Date()) {
                 let githubToken = "";
                 try {
-                    githubToken = await getUserToken(session.userId);
+                    githubToken = await getUserToken(session.githubId);
                 } catch {
                     try {
                         const u = await dynamoClient.get<{ accessToken?: string; github_token?: string }>({
                             tableName: DYNAMO_TABLES.USERS,
-                            key: { githubId: session.userId },
+                            key: { userId: session.githubId },
                         });
                         githubToken = u?.accessToken ?? u?.github_token ?? "";
                     } catch { /* non-fatal */ }
                 }
-                return { userId: session.userId, githubToken };
+                return { userId: session.githubId, githubToken };
             }
         } catch (e) {
             logger.error({ msg: "Session lookup failed", error: String(e) });
@@ -136,7 +136,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
                     const { UpdateCommand } = await import("@aws-sdk/lib-dynamodb");
                     await docClient.send(new UpdateCommand({
                         TableName: DYNAMO_TABLES.REPOSITORIES,
-                        Key: { repoId: (repo?.repoId ?? (repo as any)?.id ?? repoId) as string },
+                        Key: { repoId: repo?.repoId ?? repo?.id ?? repoId },
                         UpdateExpression: "SET automationReport.#st = :failed, automationReport.#err = :err, automationReport.updatedAt = :ts",
                         ExpressionAttributeNames: { "#st": "status", "#err": "error" },
                         ExpressionAttributeValues: {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getInfrastructureData.ts
  * Velocis — Infrastructure Page Handlers
  *
@@ -21,9 +21,9 @@ import {
   PutCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
 
 const JWT_SECRET   = process.env.JWT_SECRET   ?? "changeme-in-production";
 const IAC_TABLE    = process.env.IAC_TABLE    ?? "velocis-iac";
@@ -49,7 +49,7 @@ async function requireAuth(event: APIGatewayProxyEvent): Promise<string | null> 
       const hash = createHash("sha256").update(sessionToken).digest("hex");
       const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${hash}` },
+        key: { userId: `session_${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) return session.githubId;
     } catch (e) {

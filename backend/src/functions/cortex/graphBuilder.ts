@@ -1,4 +1,4 @@
-/**
+﻿/**
  * graphBuilder.ts
  * Velocis — Visual Cortex 2.0
  *
@@ -18,11 +18,11 @@
 import * as path from "path";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { fetchRepoTree, fetchFileContent } from "../../services/github/repoOps";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
-import { invokeClaude } from "../../services/aws/bedrockClient";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { fetchRepoTree, fetchFileContent } from "../../services/github/repoOps.js";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
+import { invokeClaude } from "../../services/aws/bedrockClient.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES

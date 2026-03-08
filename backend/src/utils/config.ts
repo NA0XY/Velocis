@@ -51,16 +51,6 @@ const ConfigSchema = z.object({
       message: "AWS_REGION must be a valid AWS region e.g. ap-south-1",
     }),
 
-  // Separate region for DynamoDB — use this instead of AWS_REGION in Lambda
-  // because Lambda reserves and overrides AWS_REGION to its own deploy region.
-  DYNAMO_REGION: z
-    .string()
-    .min(1)
-    .optional()
-    .refine((val) => !val || /^[a-z]{2}-[a-z]+-\d$/.test(val), {
-      message: "DYNAMO_REGION must be a valid AWS region e.g. ap-south-1",
-    }),
-
   AWS_ACCESS_KEY_ID: z
     .string()
     .min(16)

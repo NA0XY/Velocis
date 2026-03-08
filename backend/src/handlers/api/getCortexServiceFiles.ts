@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getCortexServiceFiles.ts
  * Velocis — API Handler for Service File-Level Drill-Down
  *
@@ -21,10 +21,10 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { DynamoDBDocumentClient, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { getDocClient } from "../../services/database/dynamoClient";
-import { logger } from "../../utils/logger";
-import { ok, errors } from "../../utils/apiResponse";
-import { config } from "../../utils/config";
+import { getDocClient } from "../../services/database/dynamoClient.js";
+import { logger } from "../../utils/logger.js";
+import { ok, errors } from "../../utils/apiResponse.js";
+import { config } from "../../utils/config.js";
 
 const docClient = getDocClient();
 const CORTEX_TABLE = process.env.CORTEX_TABLE ?? "velocis-cortex";

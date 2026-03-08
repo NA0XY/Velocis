@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getCortexData.ts
  * Velocis — API Handler Layer
  *
@@ -69,8 +69,8 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
-import { verifyRepoAccess } from "../../services/github/auth";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
+import { verifyRepoAccess } from "../../services/github/auth.js";
 import {
   buildCortexGraph,
   type CortexGraph,
@@ -78,10 +78,10 @@ import {
   type CortexEdge,
   type NodeType,
   type NodeStatus,
-} from "../../functions/cortex/graphBuilder";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { logActivity } from "../../utils/activityLogger";
+} from "../../functions/cortex/graphBuilder.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { logActivity } from "../../utils/activityLogger.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & INTERFACES

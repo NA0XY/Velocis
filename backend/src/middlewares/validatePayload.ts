@@ -1,9 +1,9 @@
-// src/middlewares/validatePayload.ts
+﻿// src/middlewares/validatePayload.ts
 // Zod-powered runtime validation for all incoming webhook payloads
 // Returns a discriminated union — no throwing, just clean success/failure
 
 import { ZodSchema, ZodError, z } from "zod";
-import { logger } from "../utils/logger";
+import { logger } from "../utils/logger.js";
 
 // ─────────────────────────────────────────────
 // TYPES

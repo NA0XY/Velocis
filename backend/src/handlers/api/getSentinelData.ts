@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getSentinelData.ts
  * Velocis — Sentinel Agent Handlers
  *
@@ -18,11 +18,11 @@ import {
   QueryCommand,
   PutCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { config } from "../../utils/config";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { config } from "../../utils/config.js";
 
 const JWT_SECRET      = process.env.JWT_SECRET  ?? "changeme-in-production";
 const SCAN_JOBS_TABLE = process.env.SCAN_JOBS_TABLE ?? "velocis-scan-jobs";
@@ -51,7 +51,7 @@ async function requireAuth(event: APIGatewayProxyEvent) {
       const hash = createHash("sha256").update(sessionToken).digest("hex");
       const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${hash}` },
+        key: { userId: `session_${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) return session.githubId;
     } catch (e) {

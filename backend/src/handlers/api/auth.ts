@@ -1,4 +1,4 @@
-/**
+﻿/**
  * auth.ts
  * Velocis — Authentication Handlers
  *
@@ -28,23 +28,23 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import axios from "axios";
-import { config } from "../../utils/config";
-import { logger } from "../../utils/logger";
+import { config } from "../../utils/config.js";
+import { logger } from "../../utils/logger.js";
 import {
   ok,
   err,
   errors,
   preflight,
   extractBearerToken,
-} from "../../utils/apiResponse";
-import { revokeUserToken } from "../../services/github/auth";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
+} from "../../utils/apiResponse.js";
+import { revokeUserToken } from "../../services/github/auth.js";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNALS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
@@ -225,11 +225,10 @@ function parseCookieValue(cookieHeader: string | undefined | null, name: string)
 /** Build Set-Cookie headers that immediately expire both session cookies */
 function clearCookieHeaders(): string[] {
   const isProduction = (process.env.NODE_ENV ?? "development") === "production";
-  const sessionBase = ["HttpOnly", isProduction ? "SameSite=None" : "SameSite=Lax", "Max-Age=0", "Path=/", ...(isProduction ? ["Secure"] : [])];
-  const stateBase  = ["HttpOnly", "SameSite=Lax", "Max-Age=0", "Path=/", ...(isProduction ? ["Secure"] : [])];
+  const base = ["HttpOnly", "SameSite=Lax", "Max-Age=0", "Path=/", ...(isProduction ? ["Secure"] : [])];
   return [
-    `velocis_session=; ${sessionBase.join("; ")}`,
-    `github_oauth_state=; ${stateBase.join("; ")}`,
+    `velocis_session=; ${base.join("; ")}`,
+    `github_oauth_state=; ${base.join("; ")}`,
   ];
 }
 
@@ -256,7 +255,7 @@ export const logout = async (
       // Delete the session record so it can't be reused
       await dynamoClient.remove({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: sessionKey },
+        key: { userId: sessionKey },
       });
 
       logger.info({ msg: "User logged out via session cookie" });

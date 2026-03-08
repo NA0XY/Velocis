@@ -1,9 +1,9 @@
-// src/utils/codeExtractor.ts
+﻿// src/utils/codeExtractor.ts
 // Strips and extracts structured content from LLM response strings
 // LLMs frequently wrap output in markdown fences, JSON blocks, and XML tags
 // This utility cleans all of that so downstream code gets pure, usable content
 
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 
 // ─────────────────────────────────────────────
 // TYPES

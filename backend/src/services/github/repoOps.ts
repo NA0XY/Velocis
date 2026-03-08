@@ -1,4 +1,4 @@
-// src/services/github/repoOps.ts
+﻿// src/services/github/repoOps.ts
 // All GitHub repository operations for Velocis
 // Handles: fetching files, pushing PRs, posting review comments,
 //          listing repos, triggering check runs, fetching diffs
@@ -7,9 +7,9 @@
 import { Octokit } from "@octokit/rest";
 import { throttling } from "@octokit/plugin-throttling";
 import { retry } from "@octokit/plugin-retry";
-import { getInstallationToken } from "./auth";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
+import { getInstallationToken } from "./auth.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
 
 // ─────────────────────────────────────────────
 // OCTOKIT WITH PLUGINS
@@ -46,7 +46,7 @@ function buildOctokit(token: string): Octokit {
       },
     },
     retry: {
-      doNotRetry: ["429"],  // Throttling plugin handles 429 — don't double retry
+      doNotRetry: [429],  // Throttling plugin handles 429 — don't double retry
     },
   }) as unknown as Octokit;
 }

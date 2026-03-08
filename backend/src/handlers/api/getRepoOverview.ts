@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getRepoOverview.ts
  * Velocis — GET /repos/:repoId
  */
@@ -8,11 +8,11 @@ import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
 import axios from "axios";
 import { ScanCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -33,14 +33,14 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
       const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
       const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${hash}` },
+        key: { userId: `session_${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) {
         let githubToken = "";
         try {
-          githubToken = await getUserToken(session.userId);
+          githubToken = await getUserToken(session.githubId);
         } catch { /* non-fatal — graph will be empty but page still loads */ }
-        return { userId: session.userId, githubToken };
+        return { userId: session.githubId, githubToken };
       }
     } catch (e) {
       logger.error({ msg: "Session lookup failed", error: String(e) });

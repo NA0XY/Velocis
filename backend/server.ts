@@ -9,8 +9,8 @@
  */
 
 import "dotenv/config";
-import serverless from "serverless-http";
 import express, { Request, Response, NextFunction } from "express";
+import serverless from "serverless-http";
 import { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from "aws-lambda";
 import { randomUUID } from "crypto";
 
@@ -54,16 +54,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173")
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CORS — only set headers in local dev.
-// In Lambda, the Function URL CORS config handles this; Express setting them too
-// causes duplicate Access-Control-Allow-Origin headers which browsers reject.
-const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+// CORS — allow all configured frontend origins
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (isLambda) {
-    // Lambda URL CORS handles OPTIONS preflights before invoking Lambda,
-    // and adds CORS headers to all responses. Nothing to do here.
-    return next();
-  }
   const origin = req.headers.origin ?? "";
   if (ALLOWED_ORIGINS.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -286,9 +278,9 @@ app.post("/api/fortress/api-docs", wrap(getPipelineData.postApiDocs as LambdaHan
 // § 9-debug — Cortex graph inspection (dev only)
 app.get("/debug/cortex/:repoId/graph", async (req: Request, res: Response) => {
   try {
-    const { getDocClient } = await import("./src/services/database/dynamoClient");
+    const { getDocClient } = await import("./src/services/database/dynamoClient.js");
     const { GetCommand } = await import("@aws-sdk/lib-dynamodb");
-    const { config } = await import("./src/utils/config");
+    const { config } = await import("./src/utils/config.js");
     const dc = getDocClient();
     const result = await dc.send(new GetCommand({
       TableName: config.DYNAMO_REPOSITORIES_TABLE,
@@ -352,11 +344,22 @@ app.post("/api/webhooks/github", wrap(githubPush.handler as LambdaHandler));
 // Health check
 app.get("/health", (_req, res) => res.json({ status: "ok", ts: new Date().toISOString() }));
 
-// ── Start (local dev only) ───────────────────────────────────────────────────
-// Only bind a port when running locally — not inside AWS Lambda.
-if (process.env.NODE_ENV !== "production" && process.env.AWS_EXECUTION_ENV === undefined) {
+// § 17 — API health check (Lambda deployment verification)
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({
+    status: "success",
+    message: "Velocis API is alive and kicking on AWS!",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ── Lambda handler export ────────────────────────────────────────────────────
+export const handler = serverless(app);
+
+// ── Start (local only) ───────────────────────────────────────────────────────
+if (!process.env.LAMBDA_TASK_ROOT) {
   const server = app.listen(PORT, () => {
-    console.log(`\n🚀  Velocis backend running locally at http://localhost:${PORT}`);
+    console.log(`\n🚀  Velocis backend running at http://localhost:${PORT}`);
     console.log(`    CORS allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
     console.log(`    NODE_ENV: ${process.env.NODE_ENV ?? "development"}\n`);
   });
@@ -370,6 +373,4 @@ if (process.env.NODE_ENV !== "production" && process.env.AWS_EXECUTION_ENV === u
   });
 }
 
-// Lambda handler — used when this file is the entrypoint for a serverless function.
-export const handler = serverless(app);
 export default app;

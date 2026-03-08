@@ -1,4 +1,4 @@
-/**
+﻿/**
  * updateRepoSettings.ts
  * Velocis — POST /repos/:repoId/settings
  */
@@ -7,10 +7,10 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import * as jwt from "jsonwebtoken";
 import * as crypto from "crypto";
 import { UpdateCommand, GetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { logger } from "../../utils/logger";
-import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient";
-import { getUserToken } from "../../services/github/auth";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { logger } from "../../utils/logger.js";
+import { dynamoClient, DYNAMO_TABLES, getDocClient } from "../../services/database/dynamoClient.js";
+import { getUserToken } from "../../services/github/auth.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 
@@ -31,7 +31,7 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
             const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
             const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
                 tableName: DYNAMO_TABLES.USERS,
-                key: { githubId: `session_${hash}` },
+                key: { userId: `session_${hash}` },
             });
             if (session && new Date(session.expiresAt) > new Date()) {
                 let githubToken = "";
@@ -41,7 +41,7 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
                     try {
                         const u = await dynamoClient.get<{ accessToken?: string; github_token?: string }>({
                             tableName: DYNAMO_TABLES.USERS,
-                            key: { githubId: session.githubId },
+                            key: { userId: session.githubId },
                         });
                         githubToken = u?.accessToken ?? u?.github_token ?? "";
                     } catch { /* non-fatal */ }

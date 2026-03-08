@@ -1,4 +1,4 @@
-// src/handlers/webhooks/githubPush.ts
+﻿// src/handlers/webhooks/githubPush.ts
 // The Master Orchestrator — routes ALL GitHub webhook events to the correct agent
 //
 // Supported events (per API_CONTRACT §16):
@@ -17,28 +17,28 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { verifySignature } from "../../middlewares/verifySignature";
-import { validatePayload } from "../../middlewares/validatePayload";
-import { githubPushSchema } from "../../models/schemas/githubSchemas";
-import { analyzeLogic } from "../../functions/sentinel/analyzeLogic";
-import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress";
-import { buildCortexGraph, CortexGraph } from "../../functions/cortex/graphBuilder";
-import { syncCortexServices } from "../../functions/cortex/syncCortexServices";
-import { generateIac } from "../../functions/predictor/generateIac";
-import { dynamoClient, getDocClient } from "../../services/database/dynamoClient";
+import { verifySignature } from "../../middlewares/verifySignature.js";
+import { validatePayload } from "../../middlewares/validatePayload.js";
+import { githubPushSchema } from "../../models/schemas/githubSchemas.js";
+import { analyzeLogic } from "../../functions/sentinel/analyzeLogic.js";
+import { generateQATestPlan, generateApiDocs } from "../../functions/fortress/analyzeFortress.js";
+import { buildCortexGraph, CortexGraph } from "../../functions/cortex/graphBuilder.js";
+import { syncCortexServices } from "../../functions/cortex/syncCortexServices.js";
+import { generateIac } from "../../functions/predictor/generateIac.js";
+import { dynamoClient, getDocClient } from "../../services/database/dynamoClient.js";
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { repoOps } from "../../services/github/repoOps";
-import { logger } from "../../utils/logger";
-import { config } from "../../utils/config";
-import { PushEventPayload } from "../../models/interfaces/WebhookEvent";
-import { Repository } from "../../models/interfaces/Repository";
+import { repoOps } from "../../services/github/repoOps.js";
+import { logger } from "../../utils/logger.js";
+import { config } from "../../utils/config.js";
+import { PushEventPayload } from "../../models/interfaces/WebhookEvent.js";
+import { Repository } from "../../models/interfaces/Repository.js";
 
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
 const AGENT_TIMEOUT_MS = 25000; // Lambda safe timeout buffer
 
-const _rawDynamo = new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" });
+const _rawDynamo = new DynamoDBClient({});
 const _docClient = DynamoDBDocumentClient.from(_rawDynamo);
 const SENTINEL_TABLE = process.env.SENTINEL_TABLE ?? "velocis-sentinel";
 const ACTIVITY_TABLE = process.env.ACTIVITY_TABLE ?? "velocis-activity";

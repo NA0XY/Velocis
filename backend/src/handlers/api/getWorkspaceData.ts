@@ -1,4 +1,4 @@
-/**
+﻿/**
  * getWorkspaceData.ts
  * Velocis — Workspace Handlers (Monaco editor + Sentinel AI chat panel)
  *
@@ -30,27 +30,23 @@ import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
-import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse";
-import { timeAgo } from "./getDashboard";
-import { logger } from "../../utils/logger";
-import { fetchFileContent, fetchRepoTree, listRepoBranches, pushFixCommit } from "../../services/github/repoOps";
-import { translateText } from "../../services/aws/translate";
-import { config } from "../../utils/config";
-import { logActivity } from "../../utils/activityLogger";
+import { ok, errors, preflight, extractBearerToken } from "../../utils/apiResponse.js";
+import { timeAgo } from "./getDashboard.js";
+import { logger } from "../../utils/logger.js";
+import { fetchFileContent, fetchRepoTree, listRepoBranches, pushFixCommit } from "../../services/github/repoOps.js";
+import { translateText } from "../../services/aws/translate.js";
+import { config } from "../../utils/config.js";
+import { logActivity } from "../../utils/activityLogger.js";
 import * as crypto from "crypto";
 import axios from "axios";
-import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient";
-import { getUserToken, getInstallationTokenForRepo, getAppInstallUrl } from "../../services/github/auth";
+import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClient.js";
+import { getUserToken, getInstallationTokenForRepo, getAppInstallUrl } from "../../services/github/auth.js";
 
-const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.DYNAMO_REGION ?? process.env.AWS_REGION ?? "ap-south-1" }));
+const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 // DeepSeek V3.2 on Bedrock — use BEDROCK_REGION (us-east-1), not AWS_REGION (ap-south-1).
 const BEDROCK_REGION = config.BEDROCK_REGION || config.AWS_REGION;
 const DEEPSEEK_V3_MODEL_ID = "deepseek.v3.2";
 const bedrock = new BedrockRuntimeClient({ region: BEDROCK_REGION });
-// Groq is used for edit-mode requests (faster inference than Bedrock DeepSeek).
-const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_EDIT_MODEL = "llama-3.3-70b-versatile";
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
 const ANNOTATIONS_TABLE = process.env.ANNOTATIONS_TABLE ?? "velocis-annotations";
@@ -382,22 +378,22 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
       const hash = crypto.createHash("sha256").update(sessionToken).digest("hex");
       const session = await dynamoClient.get<{ userId: string; githubId: string; expiresAt: string }>({
         tableName: DYNAMO_TABLES.USERS,
-        key: { githubId: `session_${hash}` },
+        key: { userId: `session_${hash}` },
       });
       if (session && new Date(session.expiresAt) > new Date()) {
         let githubToken = "";
         try {
-          githubToken = await getUserToken(session.userId);
+          githubToken = await getUserToken(session.githubId);
         } catch {
           try {
             const u = await dynamoClient.get<{ accessToken?: string; github_token?: string }>({
               tableName: DYNAMO_TABLES.USERS,
-              key: { githubId: session.userId },
+              key: { userId: session.githubId },
             });
             githubToken = u?.accessToken ?? u?.github_token ?? "";
           } catch { /* non-fatal */ }
         }
-        return { userId: session.userId, githubToken };
+        return { userId: session.githubId, githubToken };
       }
     } catch (e) {
       logger.error({ msg: "Session lookup failed", error: String(e) });
@@ -453,30 +449,6 @@ async function resolveRepoCreds(repoId: string): Promise<{ repoName: string | nu
       key: { repoId },
     });
     return { repoName: rec?.repoName ?? null, repoOwner: rec?.repoOwner ?? null };
-  } catch {
-    return { repoName: null, repoOwner: null };
-  }
-}
-
-/**
- * Resolves repo name and owner directly via GitHub's numeric repository ID endpoint.
- * Used as a fallback when DynamoDB lookup fails (e.g. table not yet provisioned).
- * GET /repositories/{id} works with any valid user/installation token.
- */
-async function resolveRepoByGitHubId(
-  repoId: string,
-  token: string
-): Promise<{ repoName: string | null; repoOwner: string | null }> {
-  if (!token || !repoId) return { repoName: null, repoOwner: null };
-  try {
-    const res = await axios.get(`https://api.github.com/repositories/${repoId}`, {
-      headers: { Authorization: `Bearer ${token}`, "User-Agent": "Velocis-App" },
-      timeout: 5000,
-    });
-    return {
-      repoName: res.data?.name ?? null,
-      repoOwner: res.data?.owner?.login ?? null,
-    };
   } catch {
     return { repoName: null, repoOwner: null };
   }
@@ -740,14 +712,8 @@ export const sendChatMessage = async (
       let name = headerName;
       if (!name || !fetchedOwner) {
         const creds = await resolveRepoCreds(repoId);
-        if (creds.repoName) name = creds.repoName;
-        if (creds.repoOwner) fetchedOwner = creds.repoOwner;
-        if (!name || !fetchedOwner) {
-          // DynamoDB lookup inconclusive — resolve repo name/owner directly from GitHub by numeric ID
-          const ghRepo = await resolveRepoByGitHubId(repoId, user.githubToken);
-          if (!name) name = ghRepo.repoName ?? repoId;
-          if (!fetchedOwner) fetchedOwner = ghRepo.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
-        }
+        if (!name) name = creds.repoName ?? repoId;
+        if (!fetchedOwner) fetchedOwner = creds.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
       }
       if (!fetchedOwner) {
         logger.warn({ repoId, msg: "sendChatMessage: could not resolve repo owner, falling back to conversational mode" });
@@ -778,21 +744,19 @@ export const sendChatMessage = async (
       if (wantsEdit) {
         systemPrompt = [
           "You are Sentinel, an autonomous coding assistant in Velocis Workspace.",
-          "The user wants to add or modify code in the file shown below.",
-          "Generate ONLY the new or modified code snippet to be injected at the bottom of the file.",
-          "Do NOT return the full file — return ONLY the new code to append.",
+          "Apply the user's requested change to the file shown below and return the COMPLETE modified file.",
           "",
           "Respond using EXACTLY this format:",
           "",
           "<SENTINEL_REPLY>",
-          "One or two sentences explaining what you generated.",
+          "One or two sentences explaining what you changed.",
           "</SENTINEL_REPLY>",
           "<SENTINEL_FILE path=\"<exact file path from the request>\">",
-          "<ONLY the new code snippet to inject — NOT the full file, NOT the existing code>",
+          "<complete modified file content — ALL original code with your changes applied>",
           "</SENTINEL_FILE>",
           "",
           "Rules:",
-          "- Return ONLY the new/changed code inside SENTINEL_FILE — do NOT include existing unchanged lines from the file.",
+          "- Return the FULL file content inside SENTINEL_FILE — not just the changed parts.",
           "- Do NOT wrap the code inside SENTINEL_FILE in markdown fences.",
           "- Do NOT include any text outside the two XML blocks above.",
           "- The path attribute must match the target file path exactly.",
@@ -816,82 +780,23 @@ export const sendChatMessage = async (
 
     let responseContent = "";
     try {
-      let rawOutput = "";
+      // DeepSeek V3.2 on Bedrock uses the Converse API (not InvokeModel)
+      const cmd = new ConverseCommand({
+        modelId: DEEPSEEK_V3_MODEL_ID,
+        system: [{ text: systemPrompt }],
+        messages: [{ role: "user", content: [{ text: userPrompt }] }],
+        inferenceConfig: {
+          maxTokens: wantsEdit ? 8192 : 1024,
+          temperature: 0.3,
+          topP: 0.9,
+        },
+      });
 
-      if (wantsEdit) {
-        // Edit mode — try Bedrock DeepSeek V3 first with a hard 10s timeout so the
-        // Lambda (29s limit) always has time left to fall back to Groq.
-        let editBedrockSuccess = false;
-        const bedrockAbort = new AbortController();
-        const bedrockAbortTimer = setTimeout(() => bedrockAbort.abort(), 10_000);
-        try {
-          const editCmd = new ConverseCommand({
-            modelId: DEEPSEEK_V3_MODEL_ID,
-            system: [{ text: systemPrompt }],
-            messages: [{ role: "user", content: [{ text: userPrompt }] }],
-            inferenceConfig: {
-              maxTokens: 4096,
-              temperature: 0.3,
-              topP: 0.9,
-            },
-          });
-          const editBedrockRes = await bedrock.send(editCmd, { abortSignal: bedrockAbort.signal });
-          clearTimeout(bedrockAbortTimer);
-          rawOutput = editBedrockRes.output?.message?.content?.[0] &&
-            "text" in editBedrockRes.output.message.content[0]
-            ? (editBedrockRes.output.message.content[0] as any).text as string
-            : "";
-          editBedrockSuccess = rawOutput.trim().length > 0;
-        } catch (bedrockEditErr: any) {
-          clearTimeout(bedrockAbortTimer);
-          logger.warn({
-            repoId,
-            msg: "sendChatMessage: Bedrock edit-mode failed or timed out, falling back to Groq",
-            error: bedrockEditErr?.message,
-          });
-        }
-
-        if (!editBedrockSuccess) {
-          // Groq fallback — fast inference, fits comfortably within remaining Lambda time
-          const groqRes = await axios.post(
-            GROQ_API_URL,
-            {
-              model: GROQ_EDIT_MODEL,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user",   content: userPrompt },
-              ],
-              max_tokens: 8192,
-              temperature: 0.3,
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${GROQ_API_KEY}`,
-                "Content-Type": "application/json",
-              },
-              timeout: 18_000,
-            }
-          );
-          rawOutput = groqRes.data?.choices?.[0]?.message?.content ?? "";
-        }
-      } else {
-        // Conversational mode — keep using Bedrock DeepSeek.
-        const cmd = new ConverseCommand({
-          modelId: DEEPSEEK_V3_MODEL_ID,
-          system: [{ text: systemPrompt }],
-          messages: [{ role: "user", content: [{ text: userPrompt }] }],
-          inferenceConfig: {
-            maxTokens: 1024,
-            temperature: 0.3,
-            topP: 0.9,
-          },
-        });
-        const bedrockRes = await bedrock.send(cmd);
-        rawOutput = bedrockRes.output?.message?.content?.[0] &&
-          "text" in bedrockRes.output.message.content[0]
-          ? (bedrockRes.output.message.content[0] as any).text as string
-          : "";
-      }
+      const bedrockRes = await bedrock.send(cmd);
+      const rawOutput = bedrockRes.output?.message?.content?.[0] &&
+        "text" in bedrockRes.output.message.content[0]
+        ? (bedrockRes.output.message.content[0] as any).text as string
+        : "";
 
       logger.info({
         repoId,
@@ -912,14 +817,7 @@ export const sendChatMessage = async (
           msg: "sendChatMessage: parseChatOutput result",
           hasAutoFix: !!autoFix,
           autoFixPath: autoFix?.file_path,
-          rawOutputPreviewForDebug: rawOutput.slice(0, 400),
         });
-
-        // When parsing couldn't extract structured auto_fix, forward the full raw model
-        // output as content so the frontend can attempt its own extraction (XML / fenced blocks).
-        if (!autoFix) {
-          responseContent = rawOutput;
-        }
 
         if (autoFix) {
           const normalizedAutoFixPath = autoFix.file_path.startsWith("/")
@@ -933,12 +831,11 @@ export const sendChatMessage = async (
     } catch (e: any) {
       logger.error({
         repoId,
-        msg: wantsEdit ? "Groq invocation failed" : "Bedrock invocation failed",
+        msg: "Bedrock invocation failed",
         error: e?.message,
         stack: e?.stack,
-        ...(wantsEdit
-          ? { model: GROQ_EDIT_MODEL }
-          : { region: BEDROCK_REGION, model: DEEPSEEK_V3_MODEL_ID }),
+        region: BEDROCK_REGION,
+        model: DEEPSEEK_V3_MODEL_ID,
       });
       return errors.agentUnavailable("Sentinel");
     }
@@ -1036,19 +933,12 @@ export const reviewCodebase = async (
     };
 
     let owner = event.headers?.["x-repo-owner"] ?? "";
-    let name = event.headers?.["x-repo-name"] ?? "";
-    if (!name || !owner) {
-      const creds = await resolveRepoCreds(repoId);
-      if (creds.repoName) name = creds.repoName;
-      if (creds.repoOwner) owner = creds.repoOwner;
-      if (!name || !owner) {
-        // DynamoDB inconclusive — resolve via GitHub numeric ID endpoint
-        const ghRepo = await resolveRepoByGitHubId(repoId, user.githubToken);
-        if (!name) name = ghRepo.repoName ?? repoId;
-        if (!owner) owner = ghRepo.repoOwner ?? (await getGitHubLogin(user.githubToken)) ?? "";
-      }
+    const name = event.headers?.["x-repo-name"] ?? repoId;
+    if (!owner) {
+      const inferredOwner = await getGitHubLogin(user.githubToken);
+      if (inferredOwner) owner = inferredOwner;
+      else return errors.badRequest("Missing x-repo-owner header and could not infer owner.");
     }
-    if (!owner) return errors.badRequest("Missing x-repo-owner header and could not infer owner.");
 
     const tree = await fetchRepoTree({
       repoFullName: `${owner}/${name}`,
