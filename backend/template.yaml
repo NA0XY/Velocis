@@ -87,6 +87,8 @@ Globals:
         DYNAMO_REPOSITORIES_TABLE: !Ref ReposTable
         DYNAMO_USERS_TABLE:        !Ref UsersTable
         DYNAMO_AI_ACTIVITY_TABLE:  !Ref ActivityTable
+        # Single-table override: DYNAMO_USERS_TABLE falls back to this when not set explicitly
+        DYNAMODB_TABLE_NAME:       !Ref UsersTable
         # ── Secrets (SSM Parameter Store) ────────────────────────────────────
         JWT_SECRET:                !Sub "{{resolve:ssm:/velocis/${Environment}/jwt-secret}}"
         GITHUB_CLIENT_ID:          !Sub "{{resolve:ssm:/velocis/${Environment}/github-client-id}}"
@@ -710,12 +712,12 @@ Resources:
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: velocis-users
+      TableName: velocis-main
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - { AttributeName: id, AttributeType: S }
+        - { AttributeName: pk, AttributeType: S }
       KeySchema:
-        - { AttributeName: id, KeyType: HASH }
+        - { AttributeName: pk, KeyType: HASH }
 
   ReposTable:
     Type: AWS::DynamoDB::Table

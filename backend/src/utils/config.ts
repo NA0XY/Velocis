@@ -115,11 +115,12 @@ const ConfigSchema = z.object({
     .max(255)
     .default("velocis-repositories"),
 
+  // Also checks DYNAMODB_TABLE_NAME — single env var override for the main users/state table
   DYNAMO_USERS_TABLE: z
     .string()
     .min(3)
     .max(255)
-    .default("velocis-users"),
+    .default(process.env.DYNAMODB_TABLE_NAME ?? "velocis-main"),
 
   DYNAMO_AI_ACTIVITY_TABLE: z
     .string()
