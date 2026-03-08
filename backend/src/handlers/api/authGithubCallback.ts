@@ -208,7 +208,7 @@ export const handler = async (
             statusCode: 302,
             headers: {
                 ...corsHeaders,
-                Location: `${config.FRONTEND_URL}/onboarding`,
+                Location: new URL('/onboarding', config.FRONTEND_URL).toString(),
                 // API Gateway only supports one Set-Cookie header natively —
                 // use multiValueHeaders for multiple cookies
                 "Cache-Control": "no-store",
