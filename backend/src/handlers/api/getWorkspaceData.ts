@@ -819,35 +819,40 @@ export const sendChatMessage = async (
       let rawOutput = "";
 
       if (wantsEdit) {
-        // Edit mode — try Bedrock DeepSeek V3 first; fall back to Groq if Bedrock fails.
+        // Edit mode — try Bedrock DeepSeek V3 first with a hard 10s timeout so the
+        // Lambda (29s limit) always has time left to fall back to Groq.
         let editBedrockSuccess = false;
+        const bedrockAbort = new AbortController();
+        const bedrockAbortTimer = setTimeout(() => bedrockAbort.abort(), 10_000);
         try {
           const editCmd = new ConverseCommand({
             modelId: DEEPSEEK_V3_MODEL_ID,
             system: [{ text: systemPrompt }],
             messages: [{ role: "user", content: [{ text: userPrompt }] }],
             inferenceConfig: {
-              maxTokens: 8192,
+              maxTokens: 4096,
               temperature: 0.3,
               topP: 0.9,
             },
           });
-          const editBedrockRes = await bedrock.send(editCmd);
+          const editBedrockRes = await bedrock.send(editCmd, { abortSignal: bedrockAbort.signal });
+          clearTimeout(bedrockAbortTimer);
           rawOutput = editBedrockRes.output?.message?.content?.[0] &&
             "text" in editBedrockRes.output.message.content[0]
             ? (editBedrockRes.output.message.content[0] as any).text as string
             : "";
           editBedrockSuccess = rawOutput.trim().length > 0;
         } catch (bedrockEditErr: any) {
+          clearTimeout(bedrockAbortTimer);
           logger.warn({
             repoId,
-            msg: "sendChatMessage: Bedrock edit-mode failed, falling back to Groq",
+            msg: "sendChatMessage: Bedrock edit-mode failed or timed out, falling back to Groq",
             error: bedrockEditErr?.message,
           });
         }
 
         if (!editBedrockSuccess) {
-          // Groq fallback for edit mode
+          // Groq fallback — fast inference, fits comfortably within remaining Lambda time
           const groqRes = await axios.post(
             GROQ_API_URL,
             {
@@ -864,7 +869,7 @@ export const sendChatMessage = async (
                 Authorization: `Bearer ${GROQ_API_KEY}`,
                 "Content-Type": "application/json",
               },
-              timeout: 60_000,
+              timeout: 18_000,
             }
           );
           rawOutput = groqRes.data?.choices?.[0]?.message?.content ?? "";
