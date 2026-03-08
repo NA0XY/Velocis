@@ -1311,7 +1311,7 @@ export function WorkspacePage() {
                               <div className="px-3.5 py-2.5 border-t border-indigo-100/70 dark:border-slate-700/60">
                                 <button
                                   onClick={() => handleInjectCode(index)}
-                                  className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white text-[13px] font-semibold transition-all shadow-sm active:scale-[0.98]"
+                                  className="cta-btn cta-btn--blue w-full px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 bg-zinc-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-zinc-800 dark:hover:bg-white transition-colors shadow-sm"
                                 >
                                   <Zap className="w-3.5 h-3.5" />
                                   <span>Inject into code</span>
