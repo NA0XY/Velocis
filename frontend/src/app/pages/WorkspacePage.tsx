@@ -441,7 +441,39 @@ export function WorkspacePage() {
         context: { file_path: selectedFile, ref: selectedBranch || 'main' },
         language,
       });
-      let replyContent = res.content;
+      // Derive autoFix: use backend-parsed auto_fix first; fall back to extracting the
+      // largest fenced code block from the raw content (handles cases where the model
+      // returns markdown code blocks instead of the XML sentinel format).
+      let derivedAutoFix: { filePath: string; reason: string; fixedCode: string } | undefined;
+      let rawTextContent = res.content ?? '';
+
+      if (res.auto_fix?.file_path && res.auto_fix.fixed_code?.trim().length > 10) {
+        derivedAutoFix = {
+          filePath: res.auto_fix.file_path,
+          reason: res.auto_fix.reason ?? '',
+          fixedCode: res.auto_fix.fixed_code,
+        };
+      } else {
+        // Extract the largest code block from content
+        const fenceRe = /```(?:[\w.-]*)?\n?([\s\S]*?)```/g;
+        const blocks: string[] = [];
+        let fm: RegExpExecArray | null;
+        while ((fm = fenceRe.exec(rawTextContent)) !== null) {
+          if (fm[1]?.trim().length > 20) blocks.push(fm[1]);
+        }
+        const largest = blocks.sort((a, b) => b.length - a.length)[0];
+        if (largest) {
+          derivedAutoFix = {
+            filePath: selectedFile || 'unknown',
+            reason: 'Sentinel generated code',
+            fixedCode: largest.trim(),
+          };
+          // Strip raw code blocks from the displayed text (they'll appear in the preview card)
+          rawTextContent = rawTextContent.replace(/```[\w.-]*\n?[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+        }
+      }
+
+      let replyContent = rawTextContent;
       if (language !== 'en' && replyContent) {
         replyContent = await translateText(replyContent, language);
       }
@@ -468,11 +500,7 @@ export function WorkspacePage() {
             fixSuggestion: f.fix_suggestion,
           })),
         } : undefined,
-        autoFix: res.auto_fix ? {
-          filePath: res.auto_fix.file_path,
-          reason: res.auto_fix.reason,
-          fixedCode: res.auto_fix.fixed_code,
-        } : undefined,
+        autoFix: derivedAutoFix,
         autoFixApplied: false,
         timestamp: res.timestamp_ago,
       };
