@@ -37,7 +37,7 @@ const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const PIPELINE_TABLE = process.env.PIPELINE_TABLE ?? "velocis-pipeline-runs";
 const REPOS_TABLE = config.DYNAMO_REPOSITORIES_TABLE;
-const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
+const USERS_TABLE = process.env.DYNAMODB_TABLE_NAME || process.env.USERS_TABLE || "velocis-main";
 
 // ── Cookie parser (mirrors authGithubCallback.ts) ────────────────────────────
 function parseCookieValue(cookieHeader: string, name: string): string | null {
@@ -655,7 +655,7 @@ export const postQAPlan = async (
     repoOwner = repoRecord.repoOwner;
   } else {
     const userRes = await dynamo.send(
-      new GetCommand({ TableName: USERS_TABLE, Key: { userId } })
+      new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
     );
     repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
   }
@@ -863,7 +863,7 @@ export const postApiDocs = async (
     } else if (repoRecord.repoOwner) {
       repoOwner = repoRecord.repoOwner;
     } else {
-      const userRes = await dynamo.send(new GetCommand({ TableName: USERS_TABLE, Key: { userId } }));
+      const userRes = await dynamo.send(new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } }));
       repoOwner = userRes.Item?.username ?? userRes.Item?.githubLogin ?? userRes.Item?.displayName ?? "";
     }
 

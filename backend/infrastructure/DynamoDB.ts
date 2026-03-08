@@ -15,6 +15,8 @@ import {
 // Points to DynamoDB Local running via docker-compose
 // ─────────────────────────────────────────────
 
+const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME || "velocis-main";
+
 const localClient = new DynamoDBClient({
     endpoint: "http://localhost:8000",
     region: "ap-south-1",
@@ -30,23 +32,23 @@ const localClient = new DynamoDBClient({
 
 const TABLE_DEFINITIONS = [
 
-    // ── velocis-users ──────────────────────────────────────────────────────────
-    // Primary key:  githubId (String)   — GitHub's unique numeric user ID
+    // ── velocis-main (users + sessions + CSRF state) ────────────────────────
+    // Primary key:  pk (String)         — e.g. "USER#<userId>", "SESSION#<token>", "STATE#<csrf>"
     // GSI:          email-index         — Look up user by email for login
     // GSI:          username-index      — Look up user by GitHub username
     //
     // Multi-tenant: each user has their own encrypted GitHub tokens stored here.
     // The app supports ANY GitHub user who installs the Velocis GitHub App.
     {
-        TableName: "velocis-users",
+        TableName: TABLE_NAME,
         BillingMode: "PAY_PER_REQUEST" as const,
         AttributeDefinitions: [
-            { AttributeName: "githubId", AttributeType: "S" },     // PK — e.g. "12345678"
+            { AttributeName: "pk", AttributeType: "S" },            // PK — e.g. "USER#usr_12345678"
             { AttributeName: "email", AttributeType: "S" },         // GSI — for email lookup
             { AttributeName: "username", AttributeType: "S" },      // GSI — for username lookup
         ],
         KeySchema: [
-            { AttributeName: "githubId", KeyType: "HASH" },
+            { AttributeName: "pk", KeyType: "HASH" },
         ],
         GlobalSecondaryIndexes: [
             {
@@ -62,7 +64,7 @@ const TABLE_DEFINITIONS = [
         ],
         // Schema Reference (actual fields stored — not DynamoDB schema):
         // {
-        //   githubId:             string   — GitHub user ID — PRIMARY KEY
+        //   pk:                  string   — Partition key — "USER#<userId>" — PRIMARY KEY
         //   username:             string   — GitHub username (login)
         //   displayName:          string   — GitHub display name (name)
         //   email:                string   — Primary email from GitHub
@@ -112,7 +114,7 @@ const TABLE_DEFINITIONS = [
         // Schema Reference:
         // {
         //   repoId:           string   — GitHub repo ID — PRIMARY KEY
-        //   ownerGithubId:    string   — Foreign key to velocis-users.githubId
+        //   ownerGithubId:    string   — Foreign key to velocis-main.pk (USER#<userId>)
         //   repoFullName:     string   — "owner/repo"
         //   repoName:         string   — Just the repo name
         //   defaultBranch:    string   — e.g. "main"
@@ -180,7 +182,7 @@ const TABLE_DEFINITIONS = [
         //   createdAt:        string   — ISO timestamp — SORT KEY
         //   repoId:           string   — FK to velocis-repositories
         //   repoFullName:     string   — "owner/repo" for display
-        //   ownerGithubId:    string   — FK to velocis-users
+        //   ownerGithubId:    string   — FK to velocis-main (USER#<userId>)
         //   agent:            "sentinel" | "fortress" | "cortex"
         //   event:            string   — e.g. "push", "pr_review", "test_run"
         //   status:           "success" | "warning" | "failed" | "skipped"

@@ -46,7 +46,7 @@ import { dynamoClient, DYNAMO_TABLES } from "../../services/database/dynamoClien
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
+const USERS_TABLE = process.env.DYNAMODB_TABLE_NAME || process.env.USERS_TABLE || "velocis-main";
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const JWT_TTL_S = 86400; // 24 hours
 
@@ -158,7 +158,7 @@ export const handleGithubCallback = async (
     let createdAt = now;
     try {
       const existing = await dynamo.send(
-        new GetCommand({ TableName: USERS_TABLE, Key: { id: userId } })
+        new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
       );
       if (existing.Item) createdAt = existing.Item.created_at ?? now;
     } catch (_) {
@@ -169,6 +169,7 @@ export const handleGithubCallback = async (
       new PutCommand({
         TableName: USERS_TABLE,
         Item: {
+          pk: `USER#${userId}`,
           id: userId,
           github_id: ghUser.id,
           login: ghUser.login,
@@ -294,7 +295,7 @@ export const logout = async (
 
     // Clear the stored GitHub token so the session cannot be reused
     await dynamo.send(
-      new DeleteCommand({ TableName: USERS_TABLE, Key: { id: userId } })
+      new DeleteCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
     );
 
     logger.info({ userId, msg: "User logged out via JWT" });

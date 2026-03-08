@@ -106,7 +106,7 @@ function parseCookieValue(cookieHeader: string | undefined | null, name: string)
 
 const docClient = getDocClient();
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
-const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
+const USERS_TABLE = process.env.DYNAMODB_TABLE_NAME || process.env.USERS_TABLE || "velocis-main";
 const REPOS_TABLE = process.env.REPOS_TABLE ?? "velocis-repos";
 const ACTIVITY_TABLE = process.env.ACTIVITY_TABLE ?? "velocis-activity";
 const DEPLOYS_TABLE = process.env.DEPLOYS_TABLE ?? "velocis-deployments";
@@ -179,8 +179,8 @@ export const handler = async (
   });
 
   if (!user) {
-    // Try the old 'id' key if 'userId' fails (just in case)
-    const oldUserRes = await docClient.send(new GetCommand({ TableName: USERS_TABLE, Key: { id: userId } }));
+    // Try the pk key format as fallback
+    const oldUserRes = await docClient.send(new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } }));
     if (!oldUserRes.Item) return errors.unauthorized("User not found.");
     Object.assign(user, oldUserRes.Item);
   }

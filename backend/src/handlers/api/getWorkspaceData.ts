@@ -48,7 +48,7 @@ const BEDROCK_REGION = config.BEDROCK_REGION || config.AWS_REGION;
 const DEEPSEEK_V3_MODEL_ID = "deepseek.v3.2";
 const bedrock = new BedrockRuntimeClient({ region: BEDROCK_REGION });
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
-const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
+const USERS_TABLE = process.env.DYNAMODB_TABLE_NAME || process.env.USERS_TABLE || "velocis-main";
 const ANNOTATIONS_TABLE = process.env.ANNOTATIONS_TABLE ?? "velocis-annotations";
 const CHAT_TABLE = process.env.CHAT_TABLE ?? "velocis-workspace-chat";
 
@@ -405,7 +405,7 @@ async function resolveUser(event: APIGatewayProxyEvent): Promise<{ userId: strin
   try {
     const { sub: userId } = jwt.verify(token, JWT_SECRET) as { sub: string };
     const res = await dynamo.send(
-      new GetCommand({ TableName: USERS_TABLE, Key: { id: userId } })
+      new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
     );
     if (!res.Item) return null;
     return { userId, githubToken: res.Item.github_token as string };

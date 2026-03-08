@@ -21,7 +21,7 @@ import { logger } from "../../utils/logger.js";
 
 const dynamo       = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const JWT_SECRET   = process.env.JWT_SECRET   ?? "changeme-in-production";
-const USERS_TABLE  = process.env.USERS_TABLE  ?? "velocis-users";
+const USERS_TABLE  = process.env.DYNAMODB_TABLE_NAME || process.env.USERS_TABLE || "velocis-main";
 const INSTALL_TABLE = process.env.INSTALL_TABLE ?? "velocis-installations";
 
 // Map of GitHub language names to their conventional colour codes
@@ -60,7 +60,7 @@ export const handler = async (
 
   // ── Resolve GitHub token from DynamoDB ───────────────────────────────────
   const userItem = await dynamo.send(
-    new GetCommand({ TableName: USERS_TABLE, Key: { id: userId } })
+    new GetCommand({ TableName: USERS_TABLE, Key: { pk: `USER#${userId}` } })
   );
   if (!userItem.Item) return errors.unauthorized("User session not found.");
   const githubToken: string = userItem.Item.github_token;

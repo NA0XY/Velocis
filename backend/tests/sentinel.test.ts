@@ -41,7 +41,7 @@ jest.mock("../src/services/database/dynamoClient", () => ({
   updateItem: jest.fn(),
   DYNAMO_TABLES: {
     REPOSITORIES: "velocis-repositories",
-    USERS: "velocis-users",
+    USERS: process.env.DYNAMODB_TABLE_NAME ?? "velocis-main",
     AI_ACTIVITY: "velocis-ai-activity",
   },
 }));

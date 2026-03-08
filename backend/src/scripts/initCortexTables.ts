@@ -36,9 +36,9 @@ const TABLES: CreateTableCommandInput[] = [
 
   // ── Users + Sessions ──────────────────────────────────────────────────────
   {
-    TableName: process.env.USERS_TABLE ?? process.env.DYNAMO_USERS_TABLE ?? "velocis-users",
-    KeySchema: [{ AttributeName: "userId", KeyType: "HASH" }],
-    AttributeDefinitions: [{ AttributeName: "userId", AttributeType: "S" }],
+    TableName: process.env.DYNAMODB_TABLE_NAME ?? process.env.USERS_TABLE ?? process.env.DYNAMO_USERS_TABLE ?? "velocis-main",
+    KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+    AttributeDefinitions: [{ AttributeName: "pk", AttributeType: "S" }],
     BillingMode: "PAY_PER_REQUEST",
   },
 
