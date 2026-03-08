@@ -182,19 +182,19 @@ export const handler = async (
         const clearStateCookie = [
             "github_oauth_state=",
             "HttpOnly",
-            "SameSite=Lax",
+            "SameSite=None",
+            "Secure",
             "Max-Age=0",     // Immediately expire the CSRF state cookie
             "Path=/",
-            ...(isProduction ? ["Secure"] : []),
         ].join("; ");
 
         const sessionCookie = [
             `velocis_session=${sessionToken}`,
             "HttpOnly",
-            "SameSite=Lax",
+            "SameSite=None",
+            "Secure",
             `Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}`,
             "Path=/",
-            ...(isProduction ? ["Secure"] : []),
         ].join("; ");
 
         logger.info({

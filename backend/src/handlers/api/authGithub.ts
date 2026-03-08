@@ -46,10 +46,10 @@ export const handler = async (
         const stateCookie = [
             `github_oauth_state=${state}`,
             "HttpOnly",
-            "SameSite=Lax",
+            "SameSite=None",
+            "Secure",
             `Max-Age=600`,   // 10 minutes — same TTL as DynamoDB state record
             `Path=/`,
-            ...(isProduction ? ["Secure"] : []),
         ].join("; ");
 
         // ── Redirect to GitHub ────────────────────────────────────────────────────

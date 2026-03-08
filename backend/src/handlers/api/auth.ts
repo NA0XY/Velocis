@@ -122,7 +122,7 @@ export const initiateGithubOAuth = async (
     statusCode: 302,
     headers: {
       Location: `https://github.com/login/oauth/authorize?${params.toString()}`,
-      "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=300; Path=/`,
+      "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=None; Max-Age=300; Path=/`,
     },
     body: "",
   };
@@ -224,8 +224,7 @@ function parseCookieValue(cookieHeader: string | undefined | null, name: string)
 
 /** Build Set-Cookie headers that immediately expire both session cookies */
 function clearCookieHeaders(): string[] {
-  const isProduction = (process.env.NODE_ENV ?? "development") === "production";
-  const base = ["HttpOnly", "SameSite=Lax", "Max-Age=0", "Path=/", ...(isProduction ? ["Secure"] : [])];
+  const base = ["HttpOnly", "SameSite=None", "Secure", "Max-Age=0", "Path=/"];
   return [
     `velocis_session=; ${base.join("; ")}`,
     `github_oauth_state=; ${base.join("; ")}`,
