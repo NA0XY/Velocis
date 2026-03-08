@@ -10,6 +10,7 @@
 
 import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
 import serverless from "serverless-http";
 import { APIGatewayProxyEvent, APIGatewayProxyResult, Context } from "aws-lambda";
 import { randomUUID } from "crypto";
@@ -54,24 +55,15 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173")
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CORS — allow all configured frontend origins
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const origin = req.headers.origin ?? "";
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type,Authorization,x-repo-owner,x-repo-name,x-hub-signature-256,x-github-event,x-github-token,Cookie,X-Requested-With"
-  );
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  if (req.method === "OPTIONS") {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
+// CORS — explicitly allow the Amplify frontend with credentials
+app.use(
+  cors({
+    origin: 'https://main.d32db3pq6wbaq4.amplifyapp.com',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
 // ── Lambda adapter ───────────────────────────────────────────────────────────
 
