@@ -5,7 +5,7 @@ import { Github, CheckCircle } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { PrimaryButton } from './shared/PrimaryButton';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 const reassuranceItems = [
   'No code changes required',

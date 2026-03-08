@@ -33,7 +33,7 @@ import iconPipeline from '../../components/pipeline.png';
 import iconWorkspace from '../../components/workspace.png';
 import iconInfrastructure from '../../components/infrastructure (1).png';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 // Default fallback values used while data is loading or if the API fails
 const FALLBACK_REPO: RepoDetail = {

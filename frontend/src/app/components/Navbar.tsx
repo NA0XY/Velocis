@@ -7,7 +7,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { PrimaryButton } from './shared/PrimaryButton';
 import { GhostButton } from './shared/GhostButton';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 export function Navbar() {
   const navigate = useNavigate();

@@ -5,7 +5,7 @@ import { Github, Check, AlertCircle } from 'lucide-react';
 import lightLogoImg from '../../../LightLogo.png';
 
 // The backend API base URL — point to localhost during dev
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 /* ─── entrance animation (drop-in; swap for gsap if available) ─────────────── */
 const useEntrance = (ref: React.RefObject<HTMLDivElement | null>) => {

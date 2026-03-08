@@ -149,7 +149,7 @@ export function PipelinePage() {
     setQaPlanMarkdown('');
     setFilesAnalyzed([]);
     try {
-      const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) ?? 'http://localhost:3001';
+      const BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
       const res = await fetch(`${BASE_URL}/api/fortress/qa-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -197,7 +197,7 @@ export function PipelinePage() {
     setDocsError(null);
     setApiDocsMarkdown('');
     try {
-      const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) ?? 'http://localhost:3001';
+      const BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
       const res = await fetch(`${BASE_URL}/api/fortress/api-docs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

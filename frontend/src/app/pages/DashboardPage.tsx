@@ -29,7 +29,7 @@ const INITIAL_DASHBOARD: DashboardResponse = {
   system: MOCK_HEALTH,
 };
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 export const CommitBarChart = ({
   data,

@@ -5,12 +5,12 @@ export const deleteRepo = async (repoId: string): Promise<{ success: boolean }> 
 };
 /**
  * Velocis — API Client
- * Base URL: VITE_BACKEND_URL  (defaults to http://localhost:3001)
+ * Base URL: VITE_API_BASE_URL
  * Auth:     Session cookie (velocis_session) set by OAuth callback
  *           + legacy Bearer JWT fallback for older endpoints
  */
 
-const BASE_URL = (import.meta.env.VITE_BACKEND_URL as string) ?? 'http://localhost:3001';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 // ─── Typed API error ─────────────────────────────────────────────────────────
 /** Error thrown by `request()` when the server returns a non-2xx response. */

@@ -49,7 +49,7 @@ export function RepositorySettingsPage() {
         }
     }, [start]);
 
-    const BACKEND = `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'}`;
+    const BACKEND = import.meta.env.VITE_API_BASE_URL as string;
 
     useEffect(() => {
         // Fetch existing setting from dedicated settings endpoint

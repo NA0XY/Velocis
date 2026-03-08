@@ -1,9 +1,9 @@
 // src/app/services/api.ts
 // Centralized API service for all Velocis backend calls
 // Uses the session cookie automatically (credentials: 'include')
-// All requests go to VITE_BACKEND_URL — configured per environment
+// All requests go to VITE_API_BASE_URL — configured per environment
 
-const BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:3001';
+const BASE = import.meta.env.VITE_API_BASE_URL as string;
 
 // ─────────────────────────────────────────────
 // BASE FETCH WRAPPER
