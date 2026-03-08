@@ -10,7 +10,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "cors": ["./node_modules/@types/cors/index.d.ts"]
+    }
   },
   "include": [
     "src/**/*",
