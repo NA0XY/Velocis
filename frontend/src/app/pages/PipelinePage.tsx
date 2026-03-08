@@ -154,7 +154,7 @@ export function PipelinePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ repoId: repoName }),
+        body: JSON.stringify({ repoId: id }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -202,7 +202,7 @@ export function PipelinePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ repoId: repoName }),
+        body: JSON.stringify({ repoId: id }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
