@@ -186,6 +186,7 @@ export function WorkspacePage() {
   const [commitMessage, setCommitMessage] = useState('');
   const [pushAuthError, setPushAuthError] = useState('');
   const [installAppUrl, setInstallAppUrl] = useState('');
+  const [pendingInjection, setPendingInjection] = useState<{ filePath: string; fixedCode: string } | null>(null);
 
   // Dark mode state
   const { isDarkMode, setIsDarkMode } = useTheme();
@@ -529,6 +530,10 @@ export function WorkspacePage() {
         autoFixApplied: false,
         timestamp: res.timestamp_ago,
       };
+      // Surface the pending injection in the header button
+      if (derivedAutoFix) {
+        setPendingInjection({ filePath: derivedAutoFix.filePath, fixedCode: derivedAutoFix.fixedCode });
+      }
       setMessages(prev => {
         const updated = [...prev, reply];
         try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
@@ -622,9 +627,8 @@ export function WorkspacePage() {
     )));
   };
 
-  const handleInjectCode = (messageIndex: number) => {
-    const message = messages[messageIndex];
-    const fix = message?.autoFix;
+  const handleInjectCode = (fixOverride?: { filePath: string; fixedCode: string }, messageIndex?: number) => {
+    const fix = fixOverride ?? pendingInjection;
     if (!fix) return;
 
     const targetPath = selectedFile || fix.filePath;
@@ -636,14 +640,28 @@ export function WorkspacePage() {
     if (targetPath) {
       setEditedFiles(prev => ({ ...prev, [targetPath]: newContent }));
     }
+    setPendingInjection(null);
 
-    setMessages(prev => {
-      const updated = prev.map((m, idx) =>
-        idx === messageIndex ? { ...m, autoFixApplied: true } : m
-      );
-      try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
-      return updated;
-    });
+    if (messageIndex !== undefined) {
+      setMessages(prev => {
+        const updated = prev.map((m, idx) =>
+          idx === messageIndex ? { ...m, autoFixApplied: true } : m
+        );
+        try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
+        return updated;
+      });
+    } else {
+      // Mark the most recent message with autoFix as applied
+      setMessages(prev => {
+        let found = false;
+        const updated = [...prev].reverse().map(m => {
+          if (!found && m.autoFix && !m.autoFixApplied) { found = true; return { ...m, autoFixApplied: true }; }
+          return m;
+        }).reverse();
+        try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: updated })); } catch { }
+        return updated;
+      });
+    }
   };
 
   // annotations come from API state (set in useEffect above)
@@ -651,6 +669,7 @@ export function WorkspacePage() {
   const handleNewChat = () => {
     setMessages([]);
     setIsHistoryOpen(false);
+    setPendingInjection(null);
     try { localStorage.setItem(`velocis:workspace:chat:${id}`, JSON.stringify({ messages: [] })); } catch { }
   };
 
@@ -1074,16 +1093,31 @@ export function WorkspacePage() {
                     ))}
                   </div>
                 </div>
-                <button
-                  id="workspace-review-btn"
-                  onClick={handleReviewCode}
-                  disabled={isReviewing || !id}
-                  className="cta-btn w-full min-w-[110px] px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5"
-                  style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{isReviewing ? 'Reviewing...' : 'Review Code'}</span>
-                </button>
+                <div className="flex items-center gap-2 w-full">
+                  <button
+                    onClick={() => handleInjectCode()}
+                    disabled={!pendingInjection}
+                    title={pendingInjection ? `Inject into ${(pendingInjection.filePath.split('/').pop())}` : 'No code to inject yet'}
+                    className={`cta-btn flex-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      pendingInjection
+                        ? 'bg-zinc-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-zinc-800 dark:hover:bg-white shadow-sm'
+                        : 'bg-zinc-100 text-zinc-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed opacity-60'
+                    }`}
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Inject</span>
+                  </button>
+                  <button
+                    id="workspace-review-btn"
+                    onClick={handleReviewCode}
+                    disabled={isReviewing || !id}
+                    className="cta-btn flex-1 min-w-[110px] px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5"
+                    style={{ backgroundColor: 'var(--cta-primary)', color: 'var(--cta-text)' }}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isReviewing ? 'Reviewing...' : 'Review Code'}</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1307,15 +1341,10 @@ export function WorkspacePage() {
                                   ? `${message.autoFix.fixedCode.slice(0, 900)}\n// ...`
                                   : message.autoFix.fixedCode}
                               </pre>
-                              {/* Inject button */}
-                              <div className="px-3.5 py-2.5 border-t border-indigo-100/70 dark:border-slate-700/60">
-                                <button
-                                  onClick={() => handleInjectCode(index)}
-                                  className="cta-btn cta-btn--blue w-full px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 bg-zinc-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:bg-zinc-800 dark:hover:bg-white transition-colors shadow-sm"
-                                >
-                                  <Zap className="w-3.5 h-3.5" />
-                                  <span>Inject into code</span>
-                                </button>
+                              <div className="px-3.5 py-2 border-t border-indigo-100/70 dark:border-slate-700/60">
+                                <p className="text-[10px] text-indigo-500 dark:text-indigo-400 font-medium text-center">
+                                  Click <span className="font-bold">Inject</span> in the panel header to insert this code
+                                </p>
                               </div>
                             </div>
                           </div>
