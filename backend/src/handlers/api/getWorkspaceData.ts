@@ -47,6 +47,10 @@ const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.
 const BEDROCK_REGION = config.BEDROCK_REGION || config.AWS_REGION;
 const DEEPSEEK_V3_MODEL_ID = "deepseek.v3.2";
 const bedrock = new BedrockRuntimeClient({ region: BEDROCK_REGION });
+// Groq is used for edit-mode requests (faster inference than Bedrock DeepSeek).
+const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_EDIT_MODEL = "llama-3.3-70b-versatile";
 const JWT_SECRET = process.env.JWT_SECRET ?? "changeme-in-production";
 const USERS_TABLE = process.env.USERS_TABLE ?? "velocis-users";
 const ANNOTATIONS_TABLE = process.env.ANNOTATIONS_TABLE ?? "velocis-annotations";
@@ -810,23 +814,48 @@ export const sendChatMessage = async (
 
     let responseContent = "";
     try {
-      // DeepSeek V3.2 on Bedrock uses the Converse API (not InvokeModel)
-      const cmd = new ConverseCommand({
-        modelId: DEEPSEEK_V3_MODEL_ID,
-        system: [{ text: systemPrompt }],
-        messages: [{ role: "user", content: [{ text: userPrompt }] }],
-        inferenceConfig: {
-          maxTokens: wantsEdit ? 4096 : 1024,
-          temperature: 0.3,
-          topP: 0.9,
-        },
-      });
+      let rawOutput = "";
 
-      const bedrockRes = await bedrock.send(cmd);
-      const rawOutput = bedrockRes.output?.message?.content?.[0] &&
-        "text" in bedrockRes.output.message.content[0]
-        ? (bedrockRes.output.message.content[0] as any).text as string
-        : "";
+      if (wantsEdit) {
+        // Edit mode — use Groq (llama-3.3-70b-versatile) for fast structured output.
+        const groqRes = await axios.post(
+          GROQ_API_URL,
+          {
+            model: GROQ_EDIT_MODEL,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user",   content: userPrompt },
+            ],
+            max_tokens: 8192,
+            temperature: 0.3,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${GROQ_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            timeout: 60_000,
+          }
+        );
+        rawOutput = groqRes.data?.choices?.[0]?.message?.content ?? "";
+      } else {
+        // Conversational mode — keep using Bedrock DeepSeek.
+        const cmd = new ConverseCommand({
+          modelId: DEEPSEEK_V3_MODEL_ID,
+          system: [{ text: systemPrompt }],
+          messages: [{ role: "user", content: [{ text: userPrompt }] }],
+          inferenceConfig: {
+            maxTokens: 1024,
+            temperature: 0.3,
+            topP: 0.9,
+          },
+        });
+        const bedrockRes = await bedrock.send(cmd);
+        rawOutput = bedrockRes.output?.message?.content?.[0] &&
+          "text" in bedrockRes.output.message.content[0]
+          ? (bedrockRes.output.message.content[0] as any).text as string
+          : "";
+      }
 
       logger.info({
         repoId,
@@ -861,11 +890,12 @@ export const sendChatMessage = async (
     } catch (e: any) {
       logger.error({
         repoId,
-        msg: "Bedrock invocation failed",
+        msg: wantsEdit ? "Groq invocation failed" : "Bedrock invocation failed",
         error: e?.message,
         stack: e?.stack,
-        region: BEDROCK_REGION,
-        model: DEEPSEEK_V3_MODEL_ID,
+        ...(wantsEdit
+          ? { model: GROQ_EDIT_MODEL }
+          : { region: BEDROCK_REGION, model: DEEPSEEK_V3_MODEL_ID }),
       });
       return errors.agentUnavailable("Sentinel");
     }
