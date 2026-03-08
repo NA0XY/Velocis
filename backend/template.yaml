@@ -365,6 +365,34 @@ Resources:
             Path:   /repos/{repoId}/pipeline/runs/{runId}
             Method: GET
 
+  FortressQAPlanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.postQAPlan
+      Description: POST /fortress/qa-plan
+      Timeout:     120
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /fortress/qa-plan
+            Method: POST
+
+  FortressApiDocsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler:     src/handlers/api/getPipelineData.postApiDocs
+      Description: POST /fortress/api-docs
+      Timeout:     120
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref VelocisApi
+            Path:   /fortress/api-docs
+            Method: POST
+
   #                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
   #      9          CORTEX AGENT (SERVICE MAP)
   #                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
